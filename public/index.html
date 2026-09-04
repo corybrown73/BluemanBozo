@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blue Man Bozo</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#060a16">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤡</text></svg>">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#week">
+      <div class="brand-mark">🤡</div>
+      <div class="brand-text">
+        <b>Blue Man Bozo</b>
+        <span id="groupName">Bozo of the Week</span>
+      </div>
+    </a>
+    <div class="userchip" id="userChip" hidden>
+      <span class="av" id="userAvatar">🤡</span>
+      <span id="userName">…</span>
+      <button class="btn sm ghost" id="logoutBtn" title="Sign out">Out</button>
+    </div>
+  </div>
+  <div class="topbar-inner" style="padding-top:0">
+    <nav class="tabs" id="tabs"></nav>
+  </div>
+</header>
+
+<main class="wrap" id="view">
+  <div class="card"><div class="spinner"></div></div>
+</main>
+
+<div class="toast-wrap" id="toasts"></div>
+<div id="modalRoot"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

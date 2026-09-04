@@ -1,0 +1,26 @@
+# One-click deploy config for Render (render.com).
+# The disk keeps the SQLite database across redeploys — without it your
+# history is wiped every time you push.
+services:
+  - type: web
+    name: bluemanbozo
+    runtime: node
+    plan: starter          # the free plan has no persistent disk
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /healthz
+    disk:
+      name: bozo-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /data
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SITE_URL
+        value: https://www.bluemanbozo.com
+      - key: ODDS_API_KEY
+        sync: false        # set this in the Render dashboard, not in git

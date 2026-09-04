@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blue Man Bozo — Sign In</title>
+<meta name="description" content="Bozo of the Week. Members only.">
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤡</text></svg>">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="logo">
+      <div class="mark">🤡</div>
+      <h1>Blue Man Bozo</h1>
+      <p>Bozo of the Week &middot; members only</p>
+    </div>
+
+    <div id="error" class="login-error" hidden></div>
+
+    <form id="form" autocomplete="on">
+      <label class="field">
+        <span>Username</span>
+        <input id="username" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button id="submit" class="btn primary block" type="submit">Let me in</button>
+    </form>
+
+    <p class="tiny faint center" style="margin:18px 0 0">
+      Lost your password? Yell at the commissioner.
+    </p>
+  </div>
+</div>
+
+<script>
+const form = document.getElementById('form');
+const errorBox = document.getElementById('error');
+const submit = document.getElementById('submit');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  errorBox.hidden = true;
+  submit.disabled = true;
+  submit.textContent = 'Checking…';
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('username').value.trim(),
+        password: document.getElementById('password').value,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Login failed.');
+    window.location.href = '/';
+  } catch (err) {
+    errorBox.textContent = err.message;
+    errorBox.hidden = false;
+    submit.disabled = false;
+    submit.textContent = 'Let me in';
+    document.getElementById('password').value = '';
+    document.getElementById('password').focus();
+  }
+});
+</script>
+</body>
+</html>
