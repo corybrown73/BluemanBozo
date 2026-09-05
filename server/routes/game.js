@@ -155,9 +155,20 @@ router.post('/weeks/:id/picks', (req, res) => {
   if (!selection) return res.status(400).json({ error: 'Pick a side (Over/Under/Yes).' });
 
   const meta = odds.marketMeta(market);
+
+  // "Anytime TD Over 27.5" is not a bet that exists. Reject it outright.
+  if (!odds.sideIsValid(market, selection)) {
+    return res.status(400).json({
+      error: `${meta.label} is a ${meta.sides.join('/')} bet — "${selection}" isn't an option for it.`,
+    });
+  }
+
   const line = body.line === '' || body.line === null || body.line === undefined ? null : Number(body.line);
   if (meta.type === 'ou' && !Number.isFinite(line)) {
     return res.status(400).json({ error: `${meta.label} needs a line (e.g. 62.5).` });
+  }
+  if (meta.type === 'yesno' && line !== null) {
+    return res.status(400).json({ error: `${meta.label} has no line — leave it blank.` });
   }
   const price = parseInt(body.price, 10);
   if (!Number.isFinite(price) || price === 0) {
@@ -210,7 +221,9 @@ router.post('/weeks/:id/picks', (req, res) => {
     ).run(payload);
   }
 
-  res.json(game.weekDetail(week.id, req.user));
+  const detail = game.weekDetail(week.id, req.user);
+  const warning = odds.lineWarning(market, line);
+  res.json(warning ? { ...detail, warning } : detail);
 });
 
 router.delete('/picks/:id', (req, res) => {
@@ -259,13 +272,22 @@ router.post('/weeks/:id/grade', requireAdmin, (req, res) => {
   });
   apply(results);
 
+  const warnings = [];
+  for (const row of results) {
+    const pick = db.prepare('SELECT * FROM picks WHERE id = ? AND week_id = ?').get(row.pick_id, week.id);
+    if (!pick || row.result === 'void') continue;
+    const w = odds.actualWarning(pick.market, scoring.toNum(row.actual_value));
+    if (w) warnings.push(`${pick.player}: ${w}`);
+  }
+
   const picks = game.rawPicks(week.id);
   const allSettled = picks.length > 0 && picks.every((p) => p.result !== 'pending');
   if (allSettled && game.statusRank(week.status) < game.statusRank('graded')) {
     db.prepare("UPDATE weeks SET status = 'graded' WHERE id = ?").run(week.id);
   }
 
-  res.json(game.weekDetail(week.id, req.user));
+  const graded = game.weekDetail(week.id, req.user);
+  res.json(warnings.length ? { ...graded, warnings } : graded);
 });
 
 /* ---------------- voting ---------------- */

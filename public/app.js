@@ -158,6 +158,7 @@ const S = {
   propFilter: '',
   selectedProp: null,
   propSource: 'game',   // 'game' = one matchup | 'slate' = every game at once
+  manualMarket: null,   // market chosen in the by-hand form
   slateEstimate: null,
   slateLoading: false,
   // other views
@@ -843,20 +844,44 @@ function describeProp(p) {
   return `${p.player} ${p.selection}${line} (${oddsStr(p.price)})`;
 }
 
+/** The market currently chosen in the manual form (or the first in the catalog). */
+function currentManualMarket() {
+  const cat = S.marketCatalog || [];
+  return cat.find((m) => m.key === S.manualMarket) || cat[0] || null;
+}
+
+function sideOptionsFor(meta) {
+  const sides = meta?.sides || ['Over', 'Under'];
+  return sides.map((s) => html`<option>${s}</option>`).join('');
+}
+
+function manualLinePlaceholder() {
+  const meta = currentManualMarket();
+  if (!meta) return '74.5';
+  if (meta.type === 'yesno') return 'no line for this bet';
+  return meta.plausible ? String(meta.plausible[0] + (meta.plausible[1] - meta.plausible[0]) / 3).slice(0, 5) : '74.5';
+}
+
 function manualForm() {
   return html`<div class="grid two">
     <label class="field"><span>Player</span><input id="mPlayer" placeholder="Ja'Marr Chase"></label>
     <label class="field"><span>Market</span>
       <select id="mMarket">${raw(
         (S.marketCatalog || [])
-          .map((m) => html`<option value="${m.key}" data-type="${m.type}">${m.label}</option>`)
+          .map(
+            (m) => html`<option value="${m.key}" ${raw(m.key === currentManualMarket()?.key ? 'selected' : '')}>${m.label}</option>`
+          )
           .join('')
       )}</select>
     </label>
     <label class="field"><span>Side</span>
-      <select id="mSide"><option>Over</option><option>Under</option><option>Yes</option><option>No</option></select>
+      <select id="mSide">${raw(sideOptionsFor(currentManualMarket()))}</select>
     </label>
-    <label class="field"><span>Line <span class="faint">(blank for Anytime TD)</span></span><input id="mLine" type="number" step="0.5" placeholder="74.5"></label>
+    <label class="field"><span>Line</span>
+      <input id="mLine" type="number" step="0.5" placeholder="${raw(manualLinePlaceholder())}"
+             ${raw(currentManualMarket()?.type === 'yesno' ? 'disabled' : '')}>
+      <div id="lineWarn" class="tiny" style="color:#fbcb70;margin-top:5px"></div>
+    </label>
     <label class="field"><span>American odds</span><input id="mPrice" type="number" step="5" placeholder="-110"></label>
     <label class="field"><span>Book</span><input id="mBook" placeholder="DraftKings"></label>
   </div>
@@ -907,6 +932,17 @@ async function loadProps(force = false) {
   }
 }
 
+/** Client-side mirror of the server's plausibility check, for instant feedback. */
+function checkLine(meta, value) {
+  if (!meta?.plausible) return null;
+  const n = Number(value);
+  if (value === '' || !Number.isFinite(n)) return null;
+  const [min, max] = meta.plausible;
+  if (n < min) return `⚠️ ${n} is low for ${meta.label} — real lines start near ${min}. Typo?`;
+  if (n > max) return `⚠️ ${n} is high for ${meta.label} — real lines top out near ${max}. Typo?`;
+  return null;
+}
+
 async function loadSlateEstimate() {
   try {
     S.slateEstimate = await api('/api/odds/slate/estimate');
@@ -955,10 +991,12 @@ async function loadSlate(force = false) {
 
 async function submitPick(body) {
   try {
-    S.week = await api(`/api/weeks/${S.week.week.id}/picks`, {
+    const res = await api(`/api/weeks/${S.week.week.id}/picks`, {
       method: 'POST',
       body: { ...body, pick_id: myPick()?.id },
     });
+    S.week = res;
+    if (res.warning) toast(res.warning, 'err', 8000);
     toast('Locked in. Good luck, you will need it.', 'ok');
     window.location.hash = 'week';
   } catch (err) {
@@ -1053,6 +1091,24 @@ function wirePick() {
         bookmaker: p.bookmaker,
         trash_talk: $('#trashTalk')?.value || '',
       });
+    });
+  }
+
+  const marketSel = $('#mMarket');
+  if (marketSel) {
+    marketSel.addEventListener('change', () => {
+      S.manualMarket = marketSel.value;
+      render();
+    });
+  }
+
+  const lineInput = $('#mLine');
+  if (lineInput) {
+    lineInput.addEventListener('input', () => {
+      const meta = currentManualMarket();
+      const warn = $('#lineWarn');
+      if (!meta || !warn) return;
+      warn.textContent = checkLine(meta, lineInput.value) || '';
     });
   }
 
@@ -1750,7 +1806,9 @@ function wireAdmin() {
         actual_value: input.value,
       }));
       try {
-        S.week = await api(`/api/weeks/${S.week.week.id}/grade`, { method: 'POST', body: { results } });
+        const res = await api(`/api/weeks/${S.week.week.id}/grade`, { method: 'POST', body: { results } });
+        S.week = res;
+        (res.warnings || []).forEach((w) => toast('⚠️ ' + w, 'err', 9000));
         toast('Results computed.', 'ok');
         S.leaderboard = null;
         render();

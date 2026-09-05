@@ -288,3 +288,66 @@ test('the slate estimate prices the job without calling the API', async () => {
   assert.strictEqual(res.data.estimated_cost, 0);
   assert.ok(res.data.cost_per_game > 0, 'cost per game reflects the enabled markets');
 });
+
+test('an impossible side for the market is rejected', async () => {
+  await call('POST', '/api/auth/login', { username: 'boss', password: 'password123' });
+  const wk = await call('POST', '/api/weeks', {});
+  const id = wk.data.week.id;
+
+  // "Anytime TD Over 27.5" is not a bet that exists.
+  let res = await call('POST', `/api/weeks/${id}/picks`, {
+    player: 'Travis Kelce', market: 'player_anytime_td', selection: 'Over', line: 27.5, price: 125,
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.data.error, /Yes\/No/);
+
+  // …and neither is "Passing Yards Yes".
+  res = await call('POST', `/api/weeks/${id}/picks`, {
+    player: 'Josh Allen', market: 'player_pass_yds', selection: 'Yes', price: -110,
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.data.error, /Over\/Under/);
+});
+
+test('a yes/no market rejects a line instead of silently keeping it', async () => {
+  const weeks = await call('GET', '/api/weeks');
+  const id = weeks.data.weeks[0].id;
+  const res = await call('POST', `/api/weeks/${id}/picks`, {
+    player: 'Travis Kelce', market: 'player_anytime_td', selection: 'Yes', line: 27.5, price: 125,
+  });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.data.error, /no line/);
+});
+
+test('an order-of-magnitude line typo is flagged but still saved', async () => {
+  const weeks = await call('GET', '/api/weeks');
+  const id = weeks.data.weeks[0].id;
+  const res = await call('POST', `/api/weeks/${id}/picks`, {
+    player: 'Fat Finger', market: 'player_reception_yds', selection: 'Over', line: 745, price: -110,
+  });
+  assert.strictEqual(res.status, 200, 'a warning must not block the pick');
+  assert.match(res.data.warning, /high for Receiving Yards/);
+  assert.ok(res.data.picks.some((p) => p.player === 'Fat Finger'), 'the pick was still recorded');
+});
+
+test('a plausible line produces no warning', async () => {
+  const weeks = await call('GET', '/api/weeks');
+  const id = weeks.data.weeks[0].id;
+  const res = await call('POST', `/api/weeks/${id}/picks`, {
+    user_id: 2, player: 'Normal Guy', market: 'player_reception_yds', selection: 'Over', line: 74.5, price: -110,
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.data.warning, undefined);
+});
+
+test('an impossible stat line is flagged at grading', async () => {
+  const weeks = await call('GET', '/api/weeks');
+  const id = weeks.data.weeks[0].id;
+  const detail = await call('GET', `/api/weeks/${id}`);
+  const pick = detail.data.picks.find((p) => p.player === 'Normal Guy');
+  const res = await call('POST', `/api/weeks/${id}/grade`, {
+    results: [{ pick_id: pick.id, actual_value: 9999 }],
+  });
+  assert.strictEqual(res.status, 200);
+  assert.match(res.data.warnings.join(' '), /record/);
+});

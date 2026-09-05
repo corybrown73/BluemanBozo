@@ -195,3 +195,36 @@ test('the slate estimator charges only for uncached games', () => {
   assert.strictEqual(est.games_to_fetch, 3);
   assert.strictEqual(est.estimated_cost, 6);
 });
+
+test('every market declares the sides it actually supports', () => {
+  const odds = require('../server/odds');
+  for (const m of odds.MARKETS) {
+    assert.ok(Array.isArray(m.sides) && m.sides.length === 2, `${m.key} has two sides`);
+    const expected = m.type === 'yesno' ? ['Yes', 'No'] : ['Over', 'Under'];
+    assert.deepStrictEqual(m.sides, expected, `${m.key} sides match its type`);
+    if (m.type === 'ou') {
+      assert.ok(m.plausible && m.plausible[0] < m.plausible[1], `${m.key} has a sane line range`);
+    } else {
+      assert.strictEqual(m.plausible, null, `${m.key} is a yes/no bet and has no line`);
+    }
+  }
+});
+
+test('real NFL lines pass the plausibility check', () => {
+  const odds = require('../server/odds');
+  const real = [
+    ['player_pass_yds', 249.5], ['player_pass_tds', 1.5], ['player_pass_completions', 22.5],
+    ['player_rush_yds', 88.5], ['player_receptions', 5.5], ['player_reception_yds', 74.5],
+    ['player_kicking_points', 7.5], ['player_sacks', 0.5],
+  ];
+  for (const [market, line] of real) {
+    assert.strictEqual(odds.lineWarning(market, line), null, `${market} ${line} should be accepted`);
+  }
+});
+
+test('magnitude typos are caught', () => {
+  const odds = require('../server/odds');
+  assert.match(odds.lineWarning('player_reception_yds', 745), /high/);
+  assert.match(odds.lineWarning('player_receptions', 55), /high/);
+  assert.match(odds.lineWarning('player_pass_yds', 24.9), /low/);
+});

@@ -22,29 +22,85 @@ const { db, getSetting } = require('./db');
 const API_BASE = 'https://api.the-odds-api.com/v4';
 const SPORT = 'americanfootball_nfl';
 
-/** Player prop markets we support, with human labels and how results are graded. */
+/**
+ * Player prop markets we support.
+ *
+ * `sides` is what the bet can actually be — an Anytime TD has no Over/Under,
+ * and passing yards has no Yes/No. `plausible` is the range real NFL lines live
+ * in; anything outside it is almost certainly a typo (a 27.5 completions line
+ * is not a thing) and gets flagged, though never blocked, because books
+ * occasionally post something strange and we are not the line police.
+ */
 const MARKETS = [
-  { key: 'player_pass_yds',        label: 'Passing Yards',      unit: 'yds',    type: 'ou',  group: 'Passing' },
-  { key: 'player_pass_tds',        label: 'Passing TDs',        unit: 'TDs',    type: 'ou',  group: 'Passing' },
-  { key: 'player_pass_attempts',   label: 'Pass Attempts',      unit: 'att',    type: 'ou',  group: 'Passing' },
-  { key: 'player_pass_completions',label: 'Completions',        unit: 'comp',   type: 'ou',  group: 'Passing' },
-  { key: 'player_pass_interceptions', label: 'Interceptions',   unit: 'INTs',   type: 'ou',  group: 'Passing' },
-  { key: 'player_rush_yds',        label: 'Rushing Yards',      unit: 'yds',    type: 'ou',  group: 'Rushing' },
-  { key: 'player_rush_attempts',   label: 'Rush Attempts',      unit: 'att',    type: 'ou',  group: 'Rushing' },
-  { key: 'player_reception_yds',   label: 'Receiving Yards',    unit: 'yds',    type: 'ou',  group: 'Receiving' },
-  { key: 'player_receptions',      label: 'Receptions',         unit: 'rec',    type: 'ou',  group: 'Receiving' },
-  { key: 'player_rush_reception_yds', label: 'Rush + Rec Yards', unit: 'yds',   type: 'ou',  group: 'Combo' },
-  { key: 'player_kicking_points',  label: 'Kicking Points',     unit: 'pts',    type: 'ou',  group: 'Kicking' },
-  { key: 'player_tackles_assists', label: 'Tackles + Assists',  unit: 'tkl',    type: 'ou',  group: 'Defense' },
-  { key: 'player_sacks',           label: 'Sacks',              unit: 'sacks',  type: 'ou',  group: 'Defense' },
-  { key: 'player_anytime_td',      label: 'Anytime TD',         unit: 'TDs',    type: 'yesno', group: 'Touchdowns' },
-  { key: 'player_1st_td',          label: 'First TD Scorer',    unit: 'TDs',    type: 'yesno', group: 'Touchdowns' },
+  { key: 'player_pass_yds',           label: 'Passing Yards',     unit: 'yds',   type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], plausible: [75, 450] },
+  { key: 'player_pass_tds',           label: 'Passing TDs',       unit: 'TDs',   type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], plausible: [0.5, 5.5] },
+  { key: 'player_pass_attempts',      label: 'Pass Attempts',     unit: 'att',   type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], plausible: [8, 60] },
+  { key: 'player_pass_completions',   label: 'Completions',       unit: 'comp',  type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], plausible: [5, 42] },
+  { key: 'player_pass_interceptions', label: 'Interceptions',     unit: 'INTs',  type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], plausible: [0.5, 2.5] },
+  { key: 'player_rush_yds',           label: 'Rushing Yards',     unit: 'yds',   type: 'ou',    group: 'Rushing',    sides: ['Over', 'Under'], plausible: [2.5, 200] },
+  { key: 'player_rush_attempts',      label: 'Rush Attempts',     unit: 'att',   type: 'ou',    group: 'Rushing',    sides: ['Over', 'Under'], plausible: [1.5, 32] },
+  { key: 'player_reception_yds',      label: 'Receiving Yards',   unit: 'yds',   type: 'ou',    group: 'Receiving',  sides: ['Over', 'Under'], plausible: [2.5, 160] },
+  { key: 'player_receptions',         label: 'Receptions',        unit: 'rec',   type: 'ou',    group: 'Receiving',  sides: ['Over', 'Under'], plausible: [0.5, 14] },
+  { key: 'player_rush_reception_yds', label: 'Rush + Rec Yards',  unit: 'yds',   type: 'ou',    group: 'Combo',      sides: ['Over', 'Under'], plausible: [5, 250] },
+  { key: 'player_kicking_points',     label: 'Kicking Points',    unit: 'pts',   type: 'ou',    group: 'Kicking',    sides: ['Over', 'Under'], plausible: [2.5, 16] },
+  { key: 'player_tackles_assists',    label: 'Tackles + Assists', unit: 'tkl',   type: 'ou',    group: 'Defense',    sides: ['Over', 'Under'], plausible: [1.5, 16] },
+  { key: 'player_sacks',              label: 'Sacks',             unit: 'sacks', type: 'ou',    group: 'Defense',    sides: ['Over', 'Under'], plausible: [0.5, 2.5] },
+  { key: 'player_anytime_td',         label: 'Anytime TD',        unit: 'TDs',   type: 'yesno', group: 'Touchdowns', sides: ['Yes', 'No'],     plausible: null },
+  { key: 'player_1st_td',             label: 'First TD Scorer',   unit: 'TDs',   type: 'yesno', group: 'Touchdowns', sides: ['Yes', 'No'],     plausible: null },
 ];
 
 const MARKET_BY_KEY = new Map(MARKETS.map((m) => [m.key, m]));
 
 function marketMeta(key) {
-  return MARKET_BY_KEY.get(key) || { key, label: key, unit: '', type: 'ou', group: 'Other' };
+  return (
+    MARKET_BY_KEY.get(key) || {
+      key,
+      label: key,
+      unit: '',
+      type: 'ou',
+      group: 'Other',
+      sides: ['Over', 'Under'],
+      plausible: null,
+    }
+  );
+}
+
+/**
+ * Is this side legal for this market? "Anytime TD Over 27.5" is not a bet that
+ * exists, so this is a hard rule rather than a warning.
+ */
+function sideIsValid(marketKey, selection) {
+  const meta = marketMeta(marketKey);
+  const side = String(selection || '').trim().toLowerCase();
+  return meta.sides.some((s) => s.toLowerCase() === side);
+}
+
+/**
+ * Flag a line that is nowhere near what the market really posts. Returns a
+ * message to show the user, or null when the number looks fine. Never blocks —
+ * it is a "did you fat-finger this?" nudge.
+ */
+function lineWarning(marketKey, line) {
+  const meta = marketMeta(marketKey);
+  if (!meta.plausible) return null;
+  const n = Number(line);
+  if (!Number.isFinite(n)) return null;
+  const [min, max] = meta.plausible;
+  if (n < min) return `${n} is low for ${meta.label} — real lines start around ${min}. Typo?`;
+  if (n > max) return `${n} is high for ${meta.label} — real lines top out around ${max}. Typo?`;
+  return null;
+}
+
+/** Same check for a graded stat line, with room for record-breaking games. */
+function actualWarning(marketKey, actual) {
+  const meta = marketMeta(marketKey);
+  if (!meta.plausible) return null;
+  const n = Number(actual);
+  if (!Number.isFinite(n)) return null;
+  if (n < 0) return `A negative ${meta.label} figure looks wrong.`;
+  const ceiling = meta.plausible[1] * 1.6;
+  if (n > ceiling) return `${n} ${meta.unit} would be an all-time record for ${meta.label}. Typo?`;
+  return null;
 }
 
 function apiKey() {
@@ -433,6 +489,9 @@ async function getScores({ daysFrom = 3, force = false } = {}) {
 module.exports = {
   MARKETS,
   marketMeta,
+  sideIsValid,
+  lineWarning,
+  actualWarning,
   getEvents,
   getEventProps,
   getSlateProps,
