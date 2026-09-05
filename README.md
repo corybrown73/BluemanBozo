@@ -13,21 +13,35 @@ Replaces the Google Sheet. Keeps the receipts.
 
 ## What it does
 
+The point is that nobody has to ask the chat "did you pick yet?" or "what's my
+record?" — the site answers it on the first screen.
+
+**This Week** opens with a status strip: *"3 of 6 in — waiting on Dave, Mike,
+Pat"*, a chip per member (✓ or waiting), and a make-your-pick button if you're
+one of the stragglers. The Make a Pick tab carries a dot until you've picked. Once
+the week locks, the ticket and everyone's picks appear; once it's graded, the
+results and the Bozo Index; once it's final, the bozo and the roast.
+
+**Hall of Shame** leads with the group — season win rate, tickets cashed,
+all-time — then an **Accuracy** ranking (who's actually good at this, by win
+rate, season and all-time records), then the bozo standings, worst picks ever,
+and streaks. All of it readable on a phone.
+
 | | |
 |---|---|
 | 🔒 **Private** | Every page is behind a login. One account per member. |
-| 🏈 **Live NFL props** | Pulls player prop lines from [The Odds API](https://the-odds-api.com). Load one game, or the whole slate at once and search any player by name. |
+| 🏈 **Live NFL props** | Pulls player prop lines from [The Odds API](https://the-odds-api.com). Load one game, or the whole slate and search any player by name. |
+| 🎚️ **Slide the line** | Move a prop off the posted number — Maye 228 → 273 — and the price re-quotes. Paste the real price from your book to record it. |
 | 🙈 **Blind picks** | Nobody sees anyone else's pick until the week locks, so you can't fade the group. |
 | 🎫 **The ticket** | Every pick becomes a parlay leg. Real combined odds, real payout math. |
 | 📋 **Grading** | Enter the actual stat line; win/loss/push is computed. No arguing about it. |
 | 🧮 **Bozo Index** | Ranks every losing pick 0–100 by how badly it missed and how safe it was supposed to be. |
 | 🗳️ **The vote** | The group votes. The Index is only a suggestion — you're the jury. |
 | 🔥 **Roasts** | Auto-generated, and they read the actual pick. Missing by 92% gets mocked differently than missing by 3%. |
+| 🗓️ **Weekly digests** | Tuesday nag, Thursday injuries, Saturday placement sheet with current lines — on a schedule, by email or text. |
 | 📣 **The summons** | Email and/or text the bozo their bad news. Or copy it for the group chat. |
-| 🏆 **Hall of Shame** | Season and all-time bozo counts, streaks, records, worst picks ever, earned titles. |
+| 📊 **Accuracy + Shame** | Group win rate, individual win rates ranked, season and all-time bozo counts, streaks, worst picks ever, earned titles. |
 | 💸 **The ledger** | Tracks who owes the ticket and whether they paid. |
-
----
 
 ## Quick start (5 minutes, on your laptop)
 
