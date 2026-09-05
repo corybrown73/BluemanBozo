@@ -221,10 +221,11 @@ const TABS = [
 
 function renderTabs() {
   const needsVote = S.week && S.week.week.voting_open && !S.week.my_vote;
+  const needsPick = S.week && S.week.week.status === 'open' && !myPick();
   $('#tabs').innerHTML = TABS.filter((t) => !t.adminOnly || S.user?.is_admin)
     .map(
       (t) => html`<button class="tab ${t.key === S.tab ? 'active' : ''}" data-tab="${t.key}">${t.label}${raw(
-        t.key === 'vote' && needsVote ? '<span class="dot"></span>' : ''
+        (t.key === 'vote' && needsVote) || (t.key === 'pick' && needsPick) ? '<span class="dot"></span>' : ''
       )}</button>`
     )
     .join('');
@@ -334,6 +335,73 @@ function ticket(parlay, week) {
    VIEW: This Week
    ============================================================ */
 
+/**
+ * The strip that replaces "did you pick yet?" in the chat. One chip per
+ * member, checked or waiting, with the stragglers named. Shown while picks
+ * are open or locked; once results are in, the board itself tells the story.
+ */
+function statusStrip() {
+  const w = S.week.week;
+  if (w.status !== 'open' && w.status !== 'locked') return '';
+
+  const roster = S.week.roster || [];
+  const inCount = roster.filter((r) => r.picked).length;
+  const waiting = roster.filter((r) => !r.picked);
+  const mePicked = roster.find((r) => r.id === S.user.id)?.picked;
+  const countdown = timeUntil(w.lock_at);
+
+  let headline;
+  let tone;
+  if (w.status === 'locked') {
+    headline = `Locked — ${inCount} of ${roster.length} in`;
+    tone = 'locked';
+  } else if (!waiting.length) {
+    headline = 'Everyone is in';
+    tone = 'done';
+  } else {
+    headline = `${inCount} of ${roster.length} in`;
+    tone = mePicked ? 'waiting' : 'you';
+  }
+
+  return html`<div class="status-strip ${tone}">
+    <div class="status-head">
+      <div>
+        <div class="eyebrow">Week ${w.week_number} · picks</div>
+        <h2>${headline}</h2>
+        ${raw(
+          waiting.length && w.status === 'open'
+            ? html`<div class="tiny muted" style="margin-top:3px">Waiting on <b>${raw(
+                waiting.map((r) => esc(r.display_name)).join(', ')
+              )}</b>${raw(countdown ? ` · locks in <b>${esc(countdown)}</b>` : '')}</div>`
+            : ''
+        )}
+      </div>
+      ${raw(
+        !mePicked && w.status === 'open'
+          ? '<a class="btn primary" href="#pick">🎯 Make your pick</a>'
+          : mePicked && w.status === 'open'
+          ? '<span class="badge win" style="font-size:12px;padding:6px 12px">✅ You\'re in</span>'
+          : ''
+      )}
+    </div>
+    <div class="chips">
+      ${raw(
+        roster
+          .map(
+            (r) => html`<div class="chip ${r.picked ? 'in' : 'out'} ${r.id === S.user.id ? 'me' : ''}" title="${
+              r.picked ? 'Picked' : 'Has not picked'
+            }">
+              <span class="chip-av">${r.avatar}</span>
+              <span class="chip-name">${r.display_name}</span>
+              <span class="chip-state">${raw(r.picked ? '✓' : '…')}</span>
+            </div>`
+          )
+          .join('')
+      )}
+    </div>
+  </div>`;
+}
+
 function viewWeek() {
   if (!S.week) {
     return html`<div class="card"><div class="empty">
@@ -384,15 +452,19 @@ function viewWeek() {
     </div>`);
   }
 
+  /* --- who's in, who's out --- */
+  if (!bozo) parts.push(statusStrip());
+
   /* --- header --- */
+  const showTicket = w.picks_locked;
   parts.push(html`<div class="card">
     <div class="card-head">
       <h2>Week ${w.week_number}${raw(w.label ? ` — ${esc(w.label)}` : '')}</h2>
       ${raw(statusPill(w.status))}
       <div class="spacer"></div>
-      ${raw(quotaBar())}
+      ${raw(S.user.is_admin ? quotaBar() : '')}
     </div>
-    <div class="grid two">
+    <div class="grid ${raw(showTicket ? 'two' : '')}">
       <div>
         ${raw(
           S.week.payer
@@ -419,12 +491,12 @@ function viewWeek() {
           ${raw(countdown ? `<span>·</span><span>Locks in <b>${esc(countdown)}</b></span>` : '')}
         </div>
       </div>
-      <div>${raw(ticket(S.week.parlay, w))}</div>
+      ${raw(showTicket ? `<div>${ticket(S.week.parlay, w)}</div>` : '')}
     </div>
   </div>`);
 
-  /* --- your pick --- */
-  if (w.status === 'open') {
+  /* --- your pick (once you have one — the strip handles the nag) --- */
+  if (w.status === 'open' && mine) {
     parts.push(html`<div class="card">
       <div class="card-head"><h2>Your pick</h2><div class="spacer"></div></div>
       ${raw(
@@ -459,13 +531,6 @@ function viewWeek() {
       picks.length
         ? picks.map((p) => pickRow(p, { bozoUserId: bozo?.user_id })).join('')
         : '<div class="empty"><div class="big">🦗</div><p>Nobody has picked yet.</p></div>'
-    )}
-    ${raw(
-      S.week.missing_picks.length
-        ? html`<hr class="sep"><div class="tiny faint">Still missing: ${raw(
-            S.week.missing_picks.map((m) => `${esc(m.avatar)} ${esc(m.display_name)}`).join(', ')
-          )}</div>`
-        : ''
     )}
   </div>`);
 
@@ -1259,8 +1324,22 @@ function wirePick() {
   const marketSel = $('#mMarket');
   if (marketSel) {
     marketSel.addEventListener('change', () => {
+      // Update only the fields that depend on the market. A full re-render
+      // here rebuilt the form and silently threw away the player name the
+      // person had just typed.
       S.manualMarket = marketSel.value;
-      render();
+      const meta = currentManualMarket();
+      const side = $('#mSide');
+      const line = $('#mLine');
+      const warn = $('#lineWarn');
+      if (side) side.innerHTML = sideOptionsFor(meta);
+      if (line) {
+        const yesNo = meta?.type === 'yesno';
+        line.disabled = yesNo;
+        line.placeholder = manualLinePlaceholder();
+        if (yesNo) line.value = '';
+        if (warn) warn.textContent = yesNo ? '' : checkLine(meta, line.value) || '';
+      }
     });
   }
 
@@ -1489,13 +1568,71 @@ function viewShame() {
     loadLeaderboard();
     return html`<div class="card"><div class="spinner"></div></div>`;
   }
-  const { rows, season } = S.leaderboard;
+  const { rows, season, accuracy, group, min_picks_to_qualify } = S.leaderboard;
   const maxAll = Math.max(1, ...rows.map((r) => r.bozos_all_time));
+  const g = group || { season: {}, all_time: {} };
 
   return html`
+    <div class="card group-card">
+      <div class="card-head">
+        <h2>📊 ${S.settings.group_name || 'The group'}</h2>
+        <div class="spacer"></div>
+        <span class="tiny faint">how we're doing together</span>
+      </div>
+      <div class="stat-row">
+        <div class="stat">
+          <div class="stat-big">${pct(g.season.win_pct)}</div>
+          <div class="stat-label">${season.year} win rate</div>
+          <div class="stat-sub">${g.season.wins}-${g.season.losses}${raw(g.season.pushes ? `-${esc(g.season.pushes)}` : '')}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-big">${g.season.tickets_cashed}<span class="stat-of">/${g.season.tickets_total}</span></div>
+          <div class="stat-label">tickets cashed</div>
+          <div class="stat-sub">${raw(g.season.tickets_total ? pct(g.season.cash_rate) + ' of parlays' : 'none settled yet')}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-big">${pct(g.all_time.win_pct)}</div>
+          <div class="stat-label">all-time win rate</div>
+          <div class="stat-sub">${g.all_time.wins}-${g.all_time.losses} · ${g.all_time.picks} picks</div>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-head">
-        <h2>🏆 Hall of Shame</h2>
+        <h2>🎯 Accuracy</h2>
+        <div class="spacer"></div>
+        <span class="tiny faint">${raw(min_picks_to_qualify ? `${esc(min_picks_to_qualify)}+ picks to rank` : '')}</span>
+      </div>
+      ${raw(
+        (accuracy || [])
+          .map((a, i) => {
+            const at = a.all_time;
+            const se = a.season;
+            const w = Math.round((at.win_pct || 0) * 100);
+            return html`<div class="acc-row ${a.user.id === S.user.id ? 'me' : ''} ${a.qualified ? '' : 'unranked'}">
+              <div class="acc-rank">${raw(a.qualified ? '#' + (i + 1) : '—')}</div>
+              <span class="av">${a.user.avatar}</span>
+              <div class="acc-who">
+                <b>${a.user.display_name}</b>
+                <div class="tiny faint">${season.year}: ${se.wins}-${se.losses}${raw(
+                  se.pushes ? `-${esc(se.pushes)}` : ''
+                )} · all-time ${at.wins}-${at.losses}${raw(at.pushes ? `-${esc(at.pushes)}` : '')}</div>
+                <div class="meter small acc-meter"><i style="width:${raw(w)}%"></i></div>
+              </div>
+              <div class="acc-pct">
+                <div class="mono">${raw(a.qualified ? w + '%' : '<span class="faint">' + w + '%</span>')}</div>
+                <div class="tiny faint">${raw(a.qualified ? 'all-time' : 'too few')}</div>
+              </div>
+            </div>`;
+          })
+          .join('')
+      )}
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>🤡 Hall of Shame</h2>
         <span class="badge">${season.label}</span>
         <div class="spacer"></div>
       </div>
@@ -1503,7 +1640,7 @@ function viewShame() {
       <table class="lb">
         <thead><tr>
           <th></th><th>Member</th><th>Season</th><th>All time</th>
-          <th class="hide-sm">Record</th><th class="hide-sm">Rate</th><th class="hide-sm">Title</th>
+          <th class="hide-sm">Bozo rate</th><th class="hide-sm">Title</th>
         </tr></thead>
         <tbody>${raw(
           rows
@@ -1525,9 +1662,6 @@ function viewShame() {
                     ((r.bozos_all_time / maxAll) * 100).toFixed(0)
                   )}%"></i></div>
                 </td>
-                <td class="hide-sm mono tiny">${r.record.wins}-${r.record.losses}${raw(
-                  r.record.pushes ? `-${esc(r.record.pushes)}` : ''
-                )}<div class="faint">${pct(r.record.win_pct)}</div></td>
                 <td class="hide-sm mono tiny">${raw((r.bozo_rate * 100).toFixed(0))}%<div class="faint">of weeks</div></td>
                 <td class="hide-sm tiny"><b>${r.title.title}</b><div class="faint">${r.title.blurb}</div></td>
               </tr>`

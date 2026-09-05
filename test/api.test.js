@@ -432,3 +432,38 @@ test('the curve endpoint refuses a market with no line', async () => {
   assert.strictEqual(res.status, 400);
   assert.match(res.data.error, /no line to slide/);
 });
+
+test('the week detail exposes a per-member roster with pick state', async () => {
+  await call('POST', '/api/auth/login', { username: 'boss', password: 'password123' });
+  const state = await call('GET', '/api/state');
+  const roster = state.data.current_week.roster;
+  assert.ok(Array.isArray(roster) && roster.length === 2, 'one row per active member');
+  for (const r of roster) {
+    assert.ok('picked' in r && 'display_name' in r && 'avatar' in r, 'rows carry what the strip needs');
+  }
+});
+
+test('the leaderboard carries group stats and an accuracy ranking', async () => {
+  const res = await call('GET', '/api/leaderboard');
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.data.group && res.data.group.season && res.data.group.all_time, 'group block present');
+  const g = res.data.group.all_time;
+  assert.strictEqual(g.wins + g.losses + g.pushes, g.picks, 'group record adds up');
+  assert.ok(g.win_pct >= 0 && g.win_pct <= 1);
+  assert.ok(Array.isArray(res.data.accuracy), 'accuracy ranking present');
+  // Ranked members come before unranked, and ranked are sorted by win pct desc.
+  const ranked = res.data.accuracy.filter((a) => a.qualified);
+  for (let i = 1; i < ranked.length; i++) {
+    assert.ok(ranked[i - 1].all_time.win_pct >= ranked[i].all_time.win_pct, 'accuracy sorted best first');
+  }
+});
+
+test('a cashed ticket is counted only when every settled leg won', async () => {
+  const game = require('../server/game');
+  const { db } = require('../server/db');
+  const season = db.prepare('SELECT id FROM seasons LIMIT 1').get();
+  const before = game.groupStats(season.id).all_time;
+  // The first test week had one win and one loss -> settled but not cashed.
+  assert.ok(before.tickets_total >= 1, 'at least one settled ticket');
+  assert.strictEqual(before.tickets_cashed, 0, 'a week with a loss is not a cashed ticket');
+});

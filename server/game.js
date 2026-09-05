@@ -206,6 +206,20 @@ function weekDetail(weekId, viewer) {
     missing_picks: listUsers()
       .filter((u) => !picksRaw.some((p) => p.user_id === u.id))
       .map((u) => ({ id: u.id, display_name: u.display_name, avatar: u.avatar })),
+    // One row per member with their pick state — the "did you pick yet?"
+    // question, answered without anyone having to ask it.
+    roster: listUsers().map((u) => {
+      const mine = picksRaw.find((p) => p.user_id === u.id);
+      return {
+        id: u.id,
+        display_name: u.display_name,
+        avatar: u.avatar,
+        picked: Boolean(mine),
+        picked_at: mine ? mine.created_at : null,
+        result: mine ? mine.result : null,
+        is_payer: week.payer_user_id === u.id,
+      };
+    }),
   };
 }
 
@@ -297,7 +311,81 @@ function leaderboard({ seasonId = null } = {}) {
       a.user.display_name.localeCompare(b.user.display_name)
   );
 
-  return { season, rows };
+  // A second ordering for the same people: who is actually good at this.
+  // Requires a few picks before a 1-0 start counts as "100%".
+  const MIN_PICKS = 3;
+  const accuracy = [...rows]
+    .map((r) => ({
+      user: r.user,
+      season: r.season_record,
+      all_time: r.record,
+      qualified: r.record.wins + r.record.losses >= MIN_PICKS,
+    }))
+    .sort(
+      (a, b) =>
+        Number(b.qualified) - Number(a.qualified) ||
+        b.all_time.win_pct - a.all_time.win_pct ||
+        b.all_time.wins - a.all_time.wins ||
+        a.user.display_name.localeCompare(b.user.display_name)
+    );
+
+  return { season, rows, accuracy, group: groupStats(season.id), min_picks_to_qualify: MIN_PICKS };
+}
+
+/**
+ * How the group as a whole is doing — the number the chat actually argues
+ * about. A "ticket" counts once every leg in that week is settled; it cashed
+ * only if every leg won (pushes drop out, as they do at the book).
+ */
+function groupStats(seasonId) {
+  const record = (where, params) =>
+    db
+      .prepare(
+        `SELECT
+           SUM(CASE WHEN p.result = 'win'  THEN 1 ELSE 0 END) AS wins,
+           SUM(CASE WHEN p.result = 'loss' THEN 1 ELSE 0 END) AS losses,
+           SUM(CASE WHEN p.result = 'push' THEN 1 ELSE 0 END) AS pushes
+         FROM picks p JOIN weeks w ON w.id = p.week_id ${where}`
+      )
+      .get(...params);
+
+  const tickets = (where, params) => {
+    const weeks = db
+      .prepare(
+        `SELECT w.id,
+           COUNT(p.id) AS legs,
+           SUM(CASE WHEN p.result = 'pending' THEN 1 ELSE 0 END) AS pending,
+           SUM(CASE WHEN p.result = 'loss' THEN 1 ELSE 0 END) AS losses,
+           SUM(CASE WHEN p.result = 'win' THEN 1 ELSE 0 END) AS wins
+         FROM weeks w JOIN picks p ON p.week_id = w.id ${where}
+         GROUP BY w.id`
+      )
+      .all(...params);
+    const settled = weeks.filter((w) => w.legs > 0 && w.pending === 0);
+    const cashed = settled.filter((w) => w.losses === 0 && w.wins > 0);
+    return { total: settled.length, cashed: cashed.length };
+  };
+
+  const shape = (r, t) => {
+    const wins = r.wins || 0;
+    const losses = r.losses || 0;
+    const pushes = r.pushes || 0;
+    return {
+      wins,
+      losses,
+      pushes,
+      picks: wins + losses + pushes,
+      win_pct: wins + losses ? Number((wins / (wins + losses)).toFixed(3)) : 0,
+      tickets_total: t.total,
+      tickets_cashed: t.cashed,
+      cash_rate: t.total ? Number((t.cashed / t.total).toFixed(3)) : 0,
+    };
+  };
+
+  return {
+    season: shape(record('WHERE w.season_id = ?', [seasonId]), tickets('WHERE w.season_id = ?', [seasonId])),
+    all_time: shape(record('', []), tickets('', [])),
+  };
 }
 
 /** Current and longest consecutive-bozo streaks, in week order. */
@@ -358,6 +446,7 @@ module.exports = {
   bozoCounts,
   weekDetail,
   leaderboard,
+  groupStats,
   bozoStreak,
   history,
 };
