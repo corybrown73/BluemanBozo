@@ -120,7 +120,12 @@ function modal(innerHtml) {
   return { el: back, close };
 }
 
-function confetti(colors = ['#2563eb', '#3b82f6', '#22d3ee', '#ef4444', '#f59e0b', '#a855f7']) {
+function confetti(colors) {
+  if (!colors) {
+    const dark = document.documentElement.dataset.theme === 'dark' ||
+      (!document.documentElement.dataset.theme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    colors = dark ? ['#0a84ff', '#5e5ce6', '#ff453a', '#ff9f0a', '#ffffff'] : ['#007aff', '#5856d6', '#ff3b30', '#ff9500', '#34c759'];
+  }
   const layer = document.createElement('div');
   layer.className = 'confetti';
   for (let i = 0; i < 90; i++) {
@@ -303,7 +308,7 @@ function quotaBar() {
     <span class="bar"><i class="${usedPct > 75 ? 'hot' : ''}" style="width:${raw(usedPct.toFixed(1))}%"></i></span>
     <span>${q.used_this_month}/${ceiling} credits${raw(
       q.provider_remaining !== null ? ` · ${esc(q.provider_remaining)} left on plan` : ''
-    )}${raw(q.cap_warning ? ' <span style="color:#fbcb70">⚠️</span>' : '')}</span>
+    )}${raw(q.cap_warning ? ' <span class="text-warn">⚠️</span>' : '')}</span>
   </div>`;
 }
 
@@ -363,8 +368,8 @@ function ticket(parlay, week) {
       <span><b>${parlay.leg_count}</b> legs</span>
       <span>·</span>
       <span>${money(parlay.stake_cents)} to win <b>${money(parlay.profit_cents)}</b></span>
-      <span>·</span>
-      <span>${pct(parlay.implied_probability)} implied</span>
+      <span class="hide-sm">·</span>
+      <span class="hide-sm">${pct(parlay.implied_probability)} implied</span>
     </div>
   </div>`;
 }
@@ -465,9 +470,9 @@ function viewWeek() {
 
   /* --- bozo reveal --- */
   if (bozo) {
-    parts.push(html`<div class="bozo-hero card" style="border:1px solid rgba(239,68,68,.4)">
+    parts.push(html`<div class="bozo-hero card">
       <div class="nose">🤡</div>
-      <div class="eyebrow" style="color:#ff9a9a">Week ${w.week_number} Bozo</div>
+      <div class="eyebrow text-danger">Week ${w.week_number} Bozo</div>
       <h2>${bozo.display_name}</h2>
       <div class="muted tiny">crowned by ${raw(
         { vote: 'group vote', 'vote-tiebreak': 'group vote (tiebreak by Bozo Index)', auto: 'the Bozo Index', commissioner: 'commissioner ruling' }[
@@ -751,7 +756,7 @@ function viewPick() {
   return html`
     ${raw(
       mine
-        ? html`<div class="card tight" style="border-color:rgba(59,130,246,.5)">
+        ? html`<div class="card tight accent-edge">
             <div class="row">
               <span style="font-size:22px">✏️</span>
               <div style="flex:1;min-width:0">
@@ -793,7 +798,7 @@ function slateBar() {
   const est = S.slateEstimate;
 
   if (S.slateLoading) {
-    return html`<div class="card tight" style="margin:12px 0 4px;border-color:rgba(59,130,246,.45)">
+    return html`<div class="card tight accent-edge" style="margin:12px 0 4px">
       <div class="row"><div class="spinner" style="width:16px;height:16px;margin:0"></div>
         <span class="tiny">Pulling every game… this takes a few seconds.</span></div>
     </div>`;
@@ -914,7 +919,7 @@ function propBoard() {
     )}" value="${S.propFilter}" style="margin-bottom:12px">
     ${raw(
       S.props.failures && S.props.failures.length
-        ? html`<p class="tiny" style="color:#fbcb70">⚠️ ${S.props.failures.length} game${raw(
+        ? html`<p class="tiny text-warn">⚠️ ${S.props.failures.length} game${raw(
             S.props.failures.length === 1 ? '' : 's'
           )} could not be loaded: ${raw(S.props.failures.map((f) => esc(f.game)).join(', '))}</p>`
         : ''
@@ -996,7 +1001,7 @@ function confirmPanel() {
   const slid = rung ? !rung.is_posted : false;
 
   return html`<hr class="sep">
-    <div class="card tight" style="margin:0 0 12px;border-color:rgba(59,130,246,.5)">
+    <div class="card tight accent-edge" style="margin:0 0 12px">
       <div class="row" style="margin-bottom:${raw(S.curve ? '12px' : '0')}">
         <span style="font-size:22px">🎯</span>
         <div style="flex:1;min-width:0">
@@ -1033,7 +1038,7 @@ function confirmPanel() {
             </div>
             ${raw(
               slid
-                ? html`<p class="tiny" style="color:#fbcb70;margin:10px 0 0">
+                ? html`<p class="tiny text-warn" style="margin:10px 0 0">
                     ⚠️ ${oddsStr(modelPrice)} is our estimate for ${line}, not a quote.
                     Check it on your book and paste the real number below.
                   </p>`
@@ -1103,7 +1108,7 @@ function manualForm() {
     <label class="field"><span>Line</span>
       <input id="mLine" type="number" step="0.5" placeholder="${raw(manualLinePlaceholder())}"
              ${raw(currentManualMarket()?.type === 'yesno' ? 'disabled' : '')}>
-      <div id="lineWarn" class="tiny" style="color:#fbcb70;margin-top:5px"></div>
+      <div id="lineWarn" class="tiny text-warn" style="margin-top:5px"></div>
     </label>
     <label class="field"><span>American odds</span><input id="mPrice" type="number" step="5" placeholder="-110"></label>
     <label class="field"><span>Book</span><input id="mBook" placeholder="DraftKings"></label>
@@ -1598,7 +1603,7 @@ function wireVote() {
       if (!confirm('Crown the bozo and close the week? This assigns next week\'s bill.')) return;
       try {
         S.week = await api(`/api/weeks/${S.week.week.id}/bozo`, { method: 'POST', body: {} });
-        confetti(['#ef4444', '#f59e0b', '#ffffff']);
+        confetti();
         toast('The bozo has been crowned.', 'ok');
         window.location.hash = 'week';
       } catch (err) {
@@ -1834,7 +1839,7 @@ function viewHistory() {
             <span class="av">${w.bozo_avatar || '⏳'}</span>
             <div class="who">
               <b>${w.year} · Week ${w.week_number} ${raw(
-                w.bozo_name ? `— <span style="color:#ff9a9a">${esc(w.bozo_name)}</span>` : '<span class="faint">in progress</span>'
+                w.bozo_name ? `— <span class="text-danger">${esc(w.bozo_name)}</span>` : '<span class="faint">in progress</span>'
               )}</b>
               <div class="bet">${raw(w.roast ? esc(w.roast) : `${esc(w.pick_count)} picks · ${esc(w.win_count)}W-${esc(w.loss_count)}L`)}</div>
             </div>
@@ -1878,7 +1883,7 @@ function showWeekModal(detail) {
     <div class="card-head"><h2>${w.season_year} · Week ${w.week_number}</h2>${raw(statusPill(w.status))}</div>
     ${raw(
       detail.bozo
-        ? html`<div class="card tight" style="border-color:rgba(239,68,68,.4);margin-bottom:14px">
+        ? html`<div class="card tight danger-edge" style="margin-bottom:14px">
             <div class="row"><span style="font-size:26px">🤡</span><b>${detail.bozo.display_name}</b></div>
             <p class="tiny muted" style="margin:8px 0 0;font-style:italic">${detail.bozo.roast}</p>
           </div>`
@@ -1969,15 +1974,13 @@ function viewAdmin() {
       <div class="grid two">
         <div>
           <p class="tiny muted">Key status: <b>${raw(
-            key.set ? `connected (from ${esc(key.source)})` : '<span style="color:#ff9a9a">not configured</span>'
+            key.set ? `connected (from ${esc(key.source)})` : '<span class="text-danger">not configured</span>'
           )}</b>${raw(
             S.quota?.plan_size ? ` · plan detected: <b>${esc(S.quota.plan_size)}</b> credits/month` : ''
           )}</p>
           ${raw(
             S.quota?.cap_warning
-              ? html`<p class="tiny" style="color:#fbcb70;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35);border-radius:8px;padding:9px 11px">
-                  ⚠️ ${S.quota.cap_warning}
-                </p>`
+              ? html`<p class="tiny note-warn">⚠️ ${S.quota.cap_warning}</p>`
               : ''
           )}
           <label class="field"><span>Monthly credit cap</span>
@@ -2403,7 +2406,7 @@ function wireAdmin() {
           <div class="card-head"><h2 style="font-size:16px">${res.subject}</h2>
             <div class="spacer"></div>
             <span class="badge">${res.credits} credits</span></div>
-          <pre style="white-space:pre-wrap;font-family:var(--mono);font-size:12.5px;line-height:1.55;background:#0a1024;border:1px solid var(--line);border-radius:9px;padding:14px;overflow-x:auto">${res.text}</pre>
+          <pre class="pre">${res.text}</pre>
         `);
       } catch (err) {
         toast(err.message, 'err', 7000);
@@ -2509,6 +2512,28 @@ function memberModal(user) {
 }
 
 /* ============================================================
+   Theme
+   ============================================================ */
+
+function applyTheme(mode) {
+  const root = document.documentElement;
+  if (mode === 'light' || mode === 'dark') root.dataset.theme = mode;
+  else delete root.dataset.theme;               // follow the system
+  $$('.theme-btn').forEach((b) => b.classList.toggle('active', b.dataset.theme === (mode || 'auto')));
+  try {
+    if (mode === 'light' || mode === 'dark') localStorage.setItem('bmb_theme', mode);
+    else localStorage.removeItem('bmb_theme');
+  } catch { /* private mode */ }
+}
+
+function wireThemeToggle() {
+  let saved = null;
+  try { saved = localStorage.getItem('bmb_theme'); } catch { saved = null; }
+  applyTheme(saved);
+  $$('.theme-btn').forEach((b) => b.addEventListener('click', () => applyTheme(b.dataset.theme === 'auto' ? null : b.dataset.theme)));
+}
+
+/* ============================================================
    First visit
    ============================================================ */
 
@@ -2580,8 +2605,15 @@ function profileModal() {
     <div class="row">
       <button class="btn" id="pfPw">Update password</button>
       <button class="btn ghost" id="pfClose">Done</button>
+      <span class="spacer"></span>
+      <button class="btn ghost text-danger" id="pfOut">Sign out</button>
     </div>
   `);
+
+  $('#pfOut', m.el).addEventListener('click', async () => {
+    await api('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
+  });
 
   let avatar = u.avatar;
   $$('[data-av]', m.el).forEach((b) =>
@@ -2663,6 +2695,7 @@ async function boot() {
     window.location.href = '/login';
   });
   $('#userChip').addEventListener('click', profileModal);
+  wireThemeToggle();
   $('#userChip').style.cursor = 'pointer';
   $('#userChip').title = 'Your profile';
 
@@ -2679,7 +2712,7 @@ async function boot() {
 
   if (S.week && S.week.week.status === 'open') loadEvents();
   if (S.tab === 'week' && S.week && S.week.bozo && S.week.bozo.user_id === S.user.id) {
-    setTimeout(() => confetti(['#ef4444', '#f59e0b', '#ffffff']), 400);
+    setTimeout(() => confetti(), 400);
   }
 
   showIntroOnce();
