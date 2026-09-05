@@ -1,6 +1,26 @@
 'use strict';
+
 const test = require('node:test');
 const assert = require('node:assert');
+
+// Point at a throwaway database BEFORE anything requires server/db. Several
+// tests here read and write settings; without this they would use — and
+// mutate — the developer's real data/bluemanbozo.db, so a local demo seed
+// could fail the suite.
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'bmb-scoring-'));
+process.env.DATA_DIR = TMP;
+process.env.DB_PATH = path.join(TMP, 'scoring.db');
+process.env.SESSION_SECRET = 'scoring-secret-that-is-long-enough';
+process.env.NODE_ENV = 'test';
+process.env.ODDS_API_KEY = '';
+test.after(() => {
+  require('../server/scheduler').stop();
+  fs.rmSync(TMP, { recursive: true, force: true });
+});
+
 const s = require('../server/scoring');
 
 test('american <-> decimal conversion', () => {
@@ -256,8 +276,10 @@ test('a credit cap larger than the real plan is detected and flagged', () => {
 });
 
 test('free-tier defaults keep a full slate affordable', () => {
-  const { getSetting } = require('../server/db');
-  const markets = getSetting('odds_markets').split(',').filter(Boolean);
+  // The shipped default is the claim being made; a local database may have
+  // been widened by whoever runs this, and that is their business.
+  const { DEFAULT_SETTINGS } = require('../server/db');
+  const markets = DEFAULT_SETTINGS.odds_markets.split(',').filter(Boolean);
   const fullSlate = markets.length * 16;
   assert.ok(fullSlate * 4 < 500, `four weekly slate loads (${fullSlate * 4}) must fit in the free 500`);
 });
