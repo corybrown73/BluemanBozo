@@ -124,7 +124,7 @@ function confetti(colors) {
   if (!colors) {
     const dark = document.documentElement.dataset.theme === 'dark' ||
       (!document.documentElement.dataset.theme && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    colors = dark ? ['#0a84ff', '#5e5ce6', '#ff453a', '#ff9f0a', '#ffffff'] : ['#007aff', '#5856d6', '#ff3b30', '#ff9500', '#34c759'];
+    colors = dark ? ['#7a73ff', '#ff5996', '#ff7a00', '#00d4ff', '#ffffff'] : ['#635bff', '#ff5996', '#ff7a00', '#00d4ff', '#0a2540'];
   }
   const layer = document.createElement('div');
   layer.className = 'confetti';
@@ -313,7 +313,7 @@ function quotaBar() {
 }
 
 function statusPill(status) {
-  const labels = { open: '🟢 Picks Open', locked: '🔒 Locked', graded: '🗳️ Voting', final: '🤡 Final' };
+  const labels = { open: 'Picks open', locked: 'Locked', graded: 'Voting', final: 'Final' };
   return html`<span class="statuspill ${status}">${labels[status] || status}</span>`;
 }
 
@@ -323,7 +323,7 @@ function pickRow(p, opts = {}) {
   if (p.hidden) {
     return html`<div class="pickrow hiddenpick">
       <span class="av">${p.avatar}</span>
-      <div class="who"><b>${p.display_name}</b><div class="bet">🔒 Locked in — hidden until kickoff</div></div>
+      <div class="who"><b>${p.display_name}</b><div class="bet">Locked in · hidden until kickoff</div></div>
       <div class="num"><span class="badge">In</span></div>
     </div>`;
   }
@@ -356,7 +356,7 @@ function ticket(parlay, week) {
       <p class="muted tiny" style="margin:8px 0 0">Odds appear once picks lock. No peeking.</p>
     </div>`;
   }
-  const statusText = { live: '⏳ Live', cashed: '🤑 CASHED', dead: '💀 Dead', empty: 'No legs yet' }[parlay.status];
+  const statusText = { live: 'Live', cashed: 'Cashed', dead: 'Dead', empty: 'No legs yet' }[parlay.status];
   return html`<div class="ticket ${parlay.status}">
     <div class="row">
       <div class="eyebrow">The Ticket · Week ${week.week_number}</div>
@@ -421,7 +421,7 @@ function statusStrip() {
       </div>
       ${raw(
         !mePicked && w.status === 'open'
-          ? '<a class="btn primary" href="#pick">🎯 Make your pick</a>'
+          ? '<a class="btn primary" href="#pick">Make your pick</a>'
           : mePicked && w.status === 'open'
           ? '<span class="badge win" style="font-size:12px;padding:6px 12px">✅ You\'re in</span>'
           : ''
@@ -485,11 +485,11 @@ function viewWeek() {
         <div><b>${bozo.counts.all_time}</b><span>all time</span></div>
       </div>
       <div class="row" style="justify-content:center;margin-top:18px">
-        <button class="btn sm" id="copySummons">📋 Copy for the group chat</button>
-        ${raw(S.user.is_admin ? '<button class="btn sm primary" id="sendSummons">📣 Send the summons</button>' : '')}
+        <button class="btn sm" id="copySummons">Copy for the group chat</button>
+        ${raw(S.user.is_admin ? '<button class="btn sm primary" id="sendSummons">Send the summons</button>' : '')}
         ${raw(
           S.user.is_admin
-            ? `<button class="btn sm ghost" id="togglePaid">${bozo.paid ? '✅ Paid' : '💸 Mark paid'}</button>`
+            ? `<button class="btn sm ghost" id="togglePaid">${bozo.paid ? ' Paid' : ' Mark paid'}</button>`
             : bozo.paid
             ? '<span class="badge win">Paid up</span>'
             : ''
@@ -548,8 +548,8 @@ function viewWeek() {
                 <div class="num"><div class="big">${oddsStr(mine.price)}</div></div>
               </div>
               <div class="row" style="margin-top:12px">
-                <a class="btn sm" href="#pick">✏️ Change it</a>
-                <button class="btn sm danger" id="deletePick">🗑️ Delete</button>
+                <a class="btn sm" href="#pick">Change it</a>
+                <button class="btn sm danger" id="deletePick">Delete</button>
               </div>`
           : html`<div class="empty" style="padding:26px">
                 <div class="big">🎯</div>
@@ -821,8 +821,7 @@ function slateBar() {
             : 'Type a player name instead of hunting through matchups.'
         )}</div>
       </div>
-      <button class="btn sm ${raw(S.propSource === 'slate' ? '' : 'primary')}" id="loadSlate">
-        ${raw(S.propSource === 'slate' ? '↻ Reload all games' : '⚡ Load all games')}
+      <button class="btn sm ${raw(S.propSource === 'slate' ? '' : 'primary')}" id="loadSlate">${raw(S.propSource === 'slate' ? '↻ Reload all games' : ' Load all games')}
       </button>
     </div>
   </div>`;
@@ -850,8 +849,7 @@ function eventListBody() {
   }
   return S.events
     .map(
-      (e) => html`<button class="gamecard ${S.selectedEvent?.id === e.id ? 'selected' : ''}" data-event="${e.id}">
-        <div class="teams">${e.away_team} @ ${e.home_team}</div>
+      (e) => html`<button class="gamecard ${S.selectedEvent?.id === e.id ? 'selected' : ''}" data-event="${e.id}"><div class="teams">${e.away_team} @ ${e.home_team}</div>
         <div class="when">${fmtKickoff(e.commence_time)}</div>
       </button>`
     )
@@ -947,8 +945,7 @@ function propBoard() {
                     .map((p, i) => {
                       const idx = S.props.props.indexOf(p);
                       const sel = S.selectedProp === idx;
-                      return html`<button class="proprow ${sel ? 'selected' : ''}" data-prop="${idx}">
-                        <div class="pname">
+                      return html`<button class="proprow ${sel ? 'selected' : ''}" data-prop="${idx}"><div class="pname">
                           <b>${p.player}</b>
                           <small>${p.selection}${raw(p.line !== null && p.line !== undefined ? ' ' + esc(p.line) : '')} · ${raw(
                             p.game_label ? `${esc(p.game_label)} · ` : ''
@@ -986,7 +983,7 @@ function marketChips() {
         )
         .join('')
     )}
-    ${raw(active ? '<button class="tab" data-chip="" style="font-size:12px;padding:6px 12px">✕ Clear</button>' : '')}
+    ${raw(active ? '<button class="tab" data-chip="" style="font-size:12px;padding:6px 12px">Clear</button>' : '')}
   </div>`;
 }
 
@@ -1058,8 +1055,7 @@ function confirmPanel() {
 
     <label class="field"><span>Trash talk (optional, shown on the board)</span>
       <input id="trashTalk" maxlength="280" placeholder="Free money. Book it."></label>
-    <button class="btn primary block" id="submitProp" ${raw(finalPrice === null ? 'disabled' : '')}>
-      ${raw(
+    <button class="btn primary block" id="submitProp" ${raw(finalPrice === null ? 'disabled' : '')}>${raw(
         finalPrice === null
           ? 'Set a price to lock this in'
           : `Lock in ${esc(p.player)} ${esc(p.selection)}${line !== null ? ' ' + esc(line) : ''} (${esc(oddsStr(finalPrice))})`
@@ -1487,8 +1483,7 @@ function viewVote() {
           ? html`<div class="grid two" style="margin-top:14px">${raw(
               cands
                 .map(
-                  (c) => html`<button class="votecard ${myVote?.nominee_id === c.user_id ? 'voted' : ''}" data-vote="${c.user_id}">
-                    ${raw(c.votes ? `<span class="votecount">${esc(c.votes)}</span>` : '')}
+                  (c) => html`<button class="votecard ${myVote?.nominee_id === c.user_id ? 'voted' : ''}" data-vote="${c.user_id}">${raw(c.votes ? `<span class="votecount">${esc(c.votes)}</span>` : '')}
                     <div class="head">
                       <span class="av">${c.avatar}</span>
                       <div><b>${c.display_name}</b>
@@ -1561,7 +1556,7 @@ function viewVote() {
             <div class="card-head"><h2>Commissioner</h2></div>
             <p class="tiny muted">Close voting and crown the bozo. The winner inherits next week's bill.</p>
             <div class="row">
-              <button class="btn danger" id="crownBozo">👑 Crown the bozo</button>
+              <button class="btn danger" id="crownBozo">Crown the bozo</button>
               <span class="tiny faint">Uses the vote leader; ties break by Bozo Index.</span>
             </div>
           </div>`
@@ -1624,7 +1619,7 @@ function castVote(nomineeId) {
     <label class="field" style="margin-top:12px"><span>Why them? <span class="faint">(optional)</span></span>
       <textarea id="voteReason" maxlength="280" placeholder="Eighteen passing yards. Eighteen."></textarea></label>
     <div class="row">
-      <button class="btn danger" id="voteGo">🤡 Cast vote</button>
+      <button class="btn danger" id="voteGo">Cast vote</button>
       <button class="btn ghost" id="voteNo">Never mind</button>
     </div>
   `);
@@ -1661,7 +1656,7 @@ function viewShame() {
   return html`
     <div class="card group-card">
       <div class="card-head">
-        <h2>📊 ${S.settings.group_name || 'The group'}</h2>
+        <h2>${S.settings.group_name || 'The group'}</h2>
         <div class="spacer"></div>
         <span class="tiny faint">how we're doing together</span>
       </div>
@@ -1686,7 +1681,7 @@ function viewShame() {
 
     <div class="card">
       <div class="card-head">
-        <h2>🎯 Accuracy</h2>
+        <h2>Accuracy</h2>
         <div class="spacer"></div>
         <span class="tiny faint">${raw(min_picks_to_qualify ? `${esc(min_picks_to_qualify)}+ picks to rank` : '')}</span>
       </div>
@@ -1718,7 +1713,7 @@ function viewShame() {
 
     <div class="card">
       <div class="card-head">
-        <h2>🤡 Hall of Shame</h2>
+        <h2>Hall of Shame</h2>
         <span class="badge">${season.label}</span>
         <div class="spacer"></div>
       </div>
@@ -1759,7 +1754,7 @@ function viewShame() {
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>💀 Worst picks ever recorded</h2></div>
+      <div class="card-head"><h2>Worst picks ever recorded</h2></div>
       ${raw(
         rows.filter((r) => r.worst_pick).length
           ? rows
@@ -1787,7 +1782,7 @@ function viewShame() {
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>🔥 Streaks</h2></div>
+      <div class="card-head"><h2>Streaks</h2></div>
       <div class="grid three">${raw(
         rows
           .filter((r) => r.streak.longest > 0)
@@ -1831,7 +1826,7 @@ function viewHistory() {
   }
 
   return html`<div class="card">
-    <div class="card-head"><h2>📜 Season history</h2></div>
+    <div class="card-head"><h2>Season history</h2></div>
     ${raw(
       S.historyRows
         .map(
@@ -1910,7 +1905,7 @@ function viewAdmin() {
 
   return html`
     <div class="card">
-      <div class="card-head"><h2>⚙️ Week control</h2><div class="spacer"></div>${raw(w ? statusPill(w.status) : '')}</div>
+      <div class="card-head"><h2>Week control</h2><div class="spacer"></div>${raw(w ? statusPill(w.status) : '')}</div>
       ${raw(
         w
           ? html`<div class="row" style="margin-bottom:14px">
@@ -1919,12 +1914,12 @@ function viewAdmin() {
               <div class="spacer" style="margin-left:auto"></div>
               ${raw(
                 w.status === 'open'
-                  ? '<button class="btn sm" data-status="locked">🔒 Lock picks</button>'
+                  ? '<button class="btn sm" data-status="locked">Lock picks</button>'
                   : w.status === 'locked'
                   ? '<span class="tiny faint">Enter stat lines below to open voting</span>'
                   : w.status === 'graded'
-                  ? '<a class="btn sm primary" href="#vote">🗳️ Go to voting</a>'
-                  : '<button class="btn sm ghost" data-status="graded">↩︎ Reopen voting</button>'
+                  ? '<a class="btn sm primary" href="#vote">Go to voting</a>'
+                  : '<button class="btn sm ghost" data-status="graded">︎ Reopen voting</button>'
               )}
             </div>
             <div class="grid three">
@@ -1939,7 +1934,7 @@ function viewAdmin() {
       )}
       <hr class="sep">
       <div class="row">
-        <button class="btn primary" id="newWeek">➕ Open the next week</button>
+        <button class="btn primary" id="newWeek">Open the next week</button>
         <span class="tiny faint">Last week's bozo is auto-assigned as the payer.</span>
       </div>
     </div>
@@ -1947,8 +1942,8 @@ function viewAdmin() {
     ${raw(w && (w.status === 'locked' || w.status === 'graded' || w.status === 'final') ? gradePanel() : '')}
 
     <div class="card">
-      <div class="card-head"><h2>👥 Members</h2><div class="spacer"></div>
-        <button class="btn sm primary" id="addMember">➕ Add member</button></div>
+      <div class="card-head"><h2>Members</h2><div class="spacer"></div>
+        <button class="btn sm primary" id="addMember">Add member</button></div>
       ${raw(
         users
           .map(
@@ -1970,7 +1965,7 @@ function viewAdmin() {
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>📡 Odds API</h2><div class="spacer"></div>${raw(quotaBar())}</div>
+      <div class="card-head"><h2>Odds API</h2><div class="spacer"></div>${raw(quotaBar())}</div>
       <div class="grid two">
         <div>
           <p class="tiny muted">Key status: <b>${raw(
@@ -2013,7 +2008,7 @@ function viewAdmin() {
       </div>
       <div class="row" style="margin-top:6px">
         <button class="btn primary" id="saveOdds">Save API settings</button>
-        <button class="btn ghost" id="clearCache">🗑️ Clear odds cache</button>
+        <button class="btn ghost" id="clearCache">Clear odds cache</button>
       </div>
       ${raw(
         usage.by_endpoint.length
@@ -2032,7 +2027,7 @@ function viewAdmin() {
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>🎛️ Group settings</h2></div>
+      <div class="card-head"><h2>Group settings</h2></div>
       <div class="grid two">
         <label class="field"><span>Group name</span><input id="sGroup" value="${settings.group_name}"></label>
         <label class="field"><span>Site URL (used in messages)</span>
@@ -2052,7 +2047,7 @@ function viewAdmin() {
     ${raw(schedulePanel())}
 
     <div class="card">
-      <div class="card-head"><h2>📬 Notifications</h2></div>
+      <div class="card-head"><h2>Notifications</h2></div>
       <p class="tiny muted">Email: <b>${raw(S.channels.email.configured ? 'ready' : 'not configured')}</b> ·
          SMS: <b>${raw(S.channels.sms.configured ? 'ready' : 'not configured')}</b></p>
       <p class="tiny faint">Configured with environment variables (SMTP_* and TWILIO_*). See the README.</p>
@@ -2073,7 +2068,7 @@ const CRON_PRESETS = {
 
 function schedulePanel() {
   const sc = S.schedule;
-  if (!sc) return html`<div class="card"><div class="card-head"><h2>🗓️ Weekly schedule</h2></div><div class="spinner"></div></div>`;
+  if (!sc) return html`<div class="card"><div class="card-head"><h2>Weekly schedule</h2></div><div class="spinner"></div></div>`;
 
   const costNote = {
     open: '0 credits',
@@ -2083,7 +2078,7 @@ function schedulePanel() {
 
   return html`<div class="card">
     <div class="card-head">
-      <h2>🗓️ Weekly schedule</h2>
+      <h2>Weekly schedule</h2>
       <span class="badge ${sc.enabled ? 'win' : ''}">${raw(sc.enabled ? 'running' : 'off')}</span>
       <div class="spacer"></div>
       <span class="tiny faint">${sc.timezone}</span>
@@ -2121,7 +2116,7 @@ function schedulePanel() {
                     : html`<option value="${j.cron}" selected>${j.cron}</option>`
                 )}
               </select>
-              <button class="btn sm ghost" data-preview="${j.key}">👁 Preview</button>
+              <button class="btn sm ghost" data-preview="${j.key}">Preview</button>
               <button class="btn sm" data-runjob="${j.key}">Send now</button>
             </div>
           </div>`
@@ -2171,7 +2166,7 @@ function schedulePanel() {
 function gradePanel() {
   const picks = S.week.picks;
   return html`<div class="card">
-    <div class="card-head"><h2>📋 Enter the stat lines</h2><div class="spacer"></div>
+    <div class="card-head"><h2>Enter the stat lines</h2><div class="spacer"></div>
       <span class="tiny faint">Results are computed from the numbers — no manual W/L</span></div>
     ${raw(
       picks
