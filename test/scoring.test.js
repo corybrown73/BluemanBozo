@@ -228,3 +228,36 @@ test('magnitude typos are caught', () => {
   assert.match(odds.lineWarning('player_receptions', 55), /high/);
   assert.match(odds.lineWarning('player_pass_yds', 24.9), /low/);
 });
+
+test('a credit cap larger than the real plan is detected and flagged', () => {
+  const { db, setSetting } = require('../server/db');
+  const odds = require('../server/odds');
+  const month = new Date().toISOString().slice(0, 7);
+
+  db.prepare('DELETE FROM api_usage').run();
+  // The provider reports remaining + used on every response; their sum is the plan.
+  db.prepare(
+    "INSERT INTO api_usage (endpoint, credits, remaining, used_total, month) VALUES ('event-odds', 5, 480, 20, ?)"
+  ).run(month);
+
+  setSetting('monthly_credit_cap', '16000');
+  const bad = odds.quotaStatus();
+  assert.strictEqual(bad.plan_size, 500, 'plan size inferred from the headers');
+  assert.strictEqual(bad.cap_exceeds_plan, true);
+  assert.match(bad.cap_warning, /higher than your actual plan/);
+
+  setSetting('monthly_credit_cap', '450');
+  const good = odds.quotaStatus();
+  assert.strictEqual(good.cap_exceeds_plan, false);
+  assert.strictEqual(good.cap_warning, null);
+
+  db.prepare('DELETE FROM api_usage').run();
+  setSetting('monthly_credit_cap', '450');
+});
+
+test('free-tier defaults keep a full slate affordable', () => {
+  const { getSetting } = require('../server/db');
+  const markets = getSetting('odds_markets').split(',').filter(Boolean);
+  const fullSlate = markets.length * 16;
+  assert.ok(fullSlate * 4 < 500, `four weekly slate loads (${fullSlate * 4}) must fit in the free 500`);
+});

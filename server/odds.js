@@ -129,7 +129,23 @@ function creditsUsedThisMonth() {
 function quotaStatus() {
   const cap = parseInt(getSetting('monthly_credit_cap'), 10) || 0;
   const used = creditsUsedThisMonth();
-  const last = db.prepare('SELECT remaining, created_at FROM api_usage WHERE remaining IS NOT NULL ORDER BY id DESC LIMIT 1').get();
+  const last = db
+    .prepare(
+      `SELECT remaining, used_total, created_at FROM api_usage
+       WHERE remaining IS NOT NULL ORDER BY id DESC LIMIT 1`
+    )
+    .get();
+
+  // The provider returns remaining + used on every response, so their sum is
+  // the real plan size. A local cap larger than that protects nothing: we would
+  // wave calls through right up until the provider starts rejecting them.
+  const planSize =
+    last && Number.isFinite(last.remaining) && Number.isFinite(last.used_total)
+      ? last.remaining + last.used_total
+      : null;
+
+  const capExceedsPlan = planSize !== null && cap > planSize;
+
   return {
     month: currentMonth(),
     used_this_month: used,
@@ -138,6 +154,13 @@ function quotaStatus() {
     over_cap: cap > 0 && used >= cap,
     provider_remaining: last ? last.remaining : null,
     provider_checked_at: last ? last.created_at : null,
+    plan_size: planSize,
+    cap_exceeds_plan: capExceedsPlan,
+    cap_warning: capExceedsPlan
+      ? `Your credit cap (${cap}) is higher than your actual plan (${planSize}/month). ` +
+        `The cap will not stop you before the provider does — lower it to about ` +
+        `${Math.floor(planSize * 0.9)} in Commissioner → Odds API.`
+      : null,
     configured: hasApiKey(),
   };
 }
@@ -207,6 +230,14 @@ async function request(pathname, params, { endpoint, credits }) {
     throw new OddsApiError(
       `Monthly credit cap reached (${quota.used_this_month}/${quota.local_cap}). ` +
         `Raise the cap in Admin, or wait for the ${quota.month} cycle to reset.`,
+      429
+    );
+  }
+  // Never spend past what the plan actually has left, whatever the local cap says.
+  if (credits > 0 && Number.isFinite(quota.provider_remaining) && quota.provider_remaining !== null && credits > quota.provider_remaining) {
+    throw new OddsApiError(
+      `That call needs ${credits} credits but your plan has only ${quota.provider_remaining} left ` +
+        `this cycle. Trim your markets, load one game instead of the slate, or upgrade your plan.`,
       429
     );
   }

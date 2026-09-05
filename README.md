@@ -85,33 +85,39 @@ The Odds API bills per market, not per call:
 | Load the whole slate | that, times the number of games |
 | Final scores | 1–2 credits |
 
-With the default **10 markets**, one game's board is **10 credits** and a full
-16-game slate is **~160**. On the 20,000/month tier that's about 125 full-slate
-refreshes a month — you will not run out.
+**Defaults are sized for the free 500-credit plan.** Five markets are enabled —
+passing yards, rushing yards, receiving yards, receptions, anytime TD — covering
+QB, RB and WR/TE. That makes:
 
-**Two ways to pick, and they cost differently:**
+- **one game = 5 credits**
+- **the entire 16-game slate = 80 credits**
+- **a full-slate load every week = 320/month**, inside the free 500
 
-- **Load all games** — one button, pulls every game, then you just type a player's
-  name. No hunting through matchups. Costs ~160 credits, and the app tells you the
-  exact price before it spends anything.
-- **Click one game** — costs 10 credits. Fine when you already know the matchup.
+**Two ways to pick:**
 
-Either way, **every response is cached for 3 hours and shared by the whole group.**
-If five of you open the board after someone loads the slate, that's still 160
-credits total, not 800. The slate loader also charges nothing for games already
-cached, so a second click right after the first is free.
+- **Load all games** — one button, pulls every game, then you type a player's
+  name. No hunting through matchups. The app prices the job before spending
+  anything.
+- **Click one game** — 5 credits, when you already know the matchup.
 
-Spend controls that stay on regardless:
+Either way, **every response is cached for 6 hours and shared by the whole
+group.** Five people browsing after one person loads the slate is still 80
+credits, not 400. Games already cached cost nothing, so a repeat click is free.
 
-- A **local monthly cap** (default 16,000 — a margin under the 20k plan) blocks
-  paid calls before they go out, and the slate loader refuses a job that would
-  breach it.
-- The credit meter sits in the header. **Commissioner → Odds API** shows the full
-  spend breakdown by endpoint and month.
+### The app knows your real plan
 
-**On the free tier instead?** Set `monthly_credit_cap` to **400** and trim to ~4
-markets in Commissioner → Odds API. Then load games one at a time rather than the
-whole slate — that keeps you near 60 credits a month, well inside the 500.
+Every API response carries your remaining and used credits, so the app infers
+your actual plan size and **warns if your local cap is set higher than your plan
+allows** — a cap of 16,000 on a 500-credit plan protects nothing. It also refuses
+any single call that would need more credits than your plan has left, regardless
+of the cap.
+
+### If you upgrade
+
+On the 20,000 tier, go to **Commissioner → Odds API** and raise
+`monthly_credit_cap` to ~18,000, turn on whatever extra markets you want, and
+optionally drop the cache to 180 minutes for fresher lines. At 10 markets a full
+slate is ~160 credits, which is roughly 110 slate loads a month.
 
 ## How a week runs
 

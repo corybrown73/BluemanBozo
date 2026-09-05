@@ -234,12 +234,16 @@ function quotaBar() {
       <span>⚠️ Odds API not connected</span>
     </div>`;
   }
-  const usedPct = q.local_cap ? Math.min(100, (q.used_this_month / q.local_cap) * 100) : 0;
-  return html`<div class="quota" title="Odds API credits used this month (local cap)">
+  // Measure against the real plan when we know it — the local cap can be wrong.
+  const ceiling = q.plan_size && q.plan_size < q.local_cap ? q.plan_size : q.local_cap;
+  const usedPct = ceiling ? Math.min(100, (q.used_this_month / ceiling) * 100) : 0;
+  return html`<div class="quota" title="${raw(
+    q.cap_warning ? esc(q.cap_warning) : 'Odds API credits used this month'
+  )}">
     <span class="bar"><i class="${usedPct > 75 ? 'hot' : ''}" style="width:${raw(usedPct.toFixed(1))}%"></i></span>
-    <span>${q.used_this_month}/${q.local_cap} credits${raw(
-      q.provider_remaining !== null ? ` · ${esc(q.provider_remaining)} left at the source` : ''
-    )}</span>
+    <span>${q.used_this_month}/${ceiling} credits${raw(
+      q.provider_remaining !== null ? ` · ${esc(q.provider_remaining)} left on plan` : ''
+    )}${raw(q.cap_warning ? ' <span style="color:#fbcb70">⚠️</span>' : '')}</span>
   </div>`;
 }
 
@@ -1592,7 +1596,16 @@ function viewAdmin() {
         <div>
           <p class="tiny muted">Key status: <b>${raw(
             key.set ? `connected (from ${esc(key.source)})` : '<span style="color:#ff9a9a">not configured</span>'
-          )}</b></p>
+          )}</b>${raw(
+            S.quota?.plan_size ? ` · plan detected: <b>${esc(S.quota.plan_size)}</b> credits/month` : ''
+          )}</p>
+          ${raw(
+            S.quota?.cap_warning
+              ? html`<p class="tiny" style="color:#fbcb70;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35);border-radius:8px;padding:9px 11px">
+                  ⚠️ ${S.quota.cap_warning}
+                </p>`
+              : ''
+          )}
           <label class="field"><span>Monthly credit cap</span>
             <input id="sCap" type="number" min="0" value="${settings.monthly_credit_cap}"></label>
           <p class="tiny faint" style="margin-top:-6px">The app refuses paid calls past this. Free tier is 500/month; the paid tier is 20,000. Keep the cap a little under your real plan.</p>

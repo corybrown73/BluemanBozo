@@ -143,14 +143,17 @@ const DEFAULT_SETTINGS = {
   hide_picks_until_lock: '1',
   default_stake_cents: '2000',
   odds_regions: 'us',
-  // Tuned for the 20k/month tier. On the 500 free tier, trim this to ~4 markets
-  // and drop monthly_credit_cap to 400 (Commissioner -> Odds API).
+  // Sized for the 500-credit free tier: five markets covering QB, RB and WR/TE
+  // plus anytime TD. At 5 credits a game that is 80 for the entire 16-game
+  // slate, so a weekly full-slate load still lands near 320/month.
+  // On a paid plan, widen this and raise monthly_credit_cap in
+  // Commissioner -> Odds API; the app checks the cap against the real plan size
+  // and warns if they disagree.
   odds_markets:
-    'player_pass_yds,player_pass_tds,player_pass_completions,player_rush_yds,player_rush_attempts,' +
-    'player_reception_yds,player_receptions,player_rush_reception_yds,player_anytime_td,player_kicking_points',
-  props_cache_minutes: '180',
+    'player_pass_yds,player_rush_yds,player_reception_yds,player_receptions,player_anytime_td',
+  props_cache_minutes: '360',
   events_cache_minutes: '60',
-  monthly_credit_cap: '16000',
+  monthly_credit_cap: '450',
 };
 
 function getSetting(key, fallback = null) {
