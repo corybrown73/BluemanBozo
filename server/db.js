@@ -143,10 +143,14 @@ const DEFAULT_SETTINGS = {
   hide_picks_until_lock: '1',
   default_stake_cents: '2000',
   odds_regions: 'us',
-  odds_markets: 'player_pass_yds,player_pass_tds,player_rush_yds,player_reception_yds,player_receptions,player_anytime_td',
-  props_cache_minutes: '360',
+  // Tuned for the 20k/month tier. On the 500 free tier, trim this to ~4 markets
+  // and drop monthly_credit_cap to 400 (Commissioner -> Odds API).
+  odds_markets:
+    'player_pass_yds,player_pass_tds,player_pass_completions,player_rush_yds,player_rush_attempts,' +
+    'player_reception_yds,player_receptions,player_rush_reception_yds,player_anytime_td,player_kicking_points',
+  props_cache_minutes: '180',
   events_cache_minutes: '60',
-  monthly_credit_cap: '400',
+  monthly_credit_cap: '16000',
 };
 
 function getSetting(key, fallback = null) {

@@ -8,11 +8,13 @@
  *   - /events/{id}/odds              -> 1 credit PER MARKET PER REGION.
  *   - /scores                        -> 1 credit (2 if daysFrom is used).
  *
- * So a 6-market player-prop pull for one game costs 6 credits. On the 500/month
- * free tier that is the whole ballgame, which is why:
+ * So a 10-market player-prop pull for one game costs 10 credits, and the whole
+ * 16-game slate costs ~160. That is affordable on the 20k/month tier and ruinous
+ * on the 500 free tier, so the spend controls stay in place either way:
  *   1. every paid response is cached in SQLite and shared by the entire group,
- *   2. props are fetched lazily for ONE game at a time, never the full slate,
- *   3. a monthly cap is enforced locally before we ever hit the wire.
+ *   2. a single game can be loaded on its own when that is all you need,
+ *   3. a monthly cap is enforced locally before we ever hit the wire,
+ *   4. the slate loader prices the job up front and refuses to blow the cap.
  */
 
 const { db, getSetting } = require('./db');
@@ -214,12 +216,7 @@ async function getEvents({ force = false } = {}) {
  */
 async function getEventProps(eventId, { markets, force = false } = {}) {
   const regions = (getSetting('odds_regions') || 'us').split(',').map((s) => s.trim()).filter(Boolean);
-  const marketList = (markets && markets.length
-    ? markets
-    : (getSetting('odds_markets') || '').split(',')
-  )
-    .map((s) => s.trim())
-    .filter((s) => MARKET_BY_KEY.has(s));
+  const marketList = resolveMarkets(markets);
 
   if (!marketList.length) throw new OddsApiError('No valid player prop markets selected.', 400);
 
@@ -320,6 +317,98 @@ function normalizeProps(raw) {
   return { game, props, bookmakers: (raw.bookmakers || []).map((b) => b.title || b.key) };
 }
 
+/** What a slate-wide pull would cost right now, and how much is already cached. */
+function estimateSlate(events, markets) {
+  const regions = (getSetting('odds_regions') || 'us').split(',').map((s) => s.trim()).filter(Boolean);
+  const marketList = resolveMarkets(markets);
+  const ttl = parseInt(getSetting('props_cache_minutes'), 10) || 180;
+  const perGame = marketList.length * regions.length;
+
+  let cached = 0;
+  for (const ev of events) {
+    const key = `props:${ev.id}:${regions.join(',')}:${[...marketList].sort().join(',')}`;
+    if (cacheGet(key, ttl)) cached += 1;
+  }
+  const toFetch = events.length - cached;
+
+  return {
+    games_total: events.length,
+    games_cached: cached,
+    games_to_fetch: toFetch,
+    markets: marketList.length,
+    regions: regions.length,
+    cost_per_game: perGame,
+    estimated_cost: toFetch * perGame,
+    quota: quotaStatus(),
+  };
+}
+
+function resolveMarkets(markets) {
+  return (markets && markets.length ? markets : (getSetting('odds_markets') || '').split(','))
+    .map((s) => s.trim())
+    .filter((s) => MARKET_BY_KEY.has(s));
+}
+
+/**
+ * Props for EVERY game on the slate, flattened into one searchable board.
+ * Cached games cost nothing, so a second call right after the first is free.
+ * Refuses to start a job that would breach the monthly cap.
+ */
+async function getSlateProps({ markets, force = false, onlyEventIds = null } = {}) {
+  const { events } = await getEvents();
+  const games = onlyEventIds ? events.filter((e) => onlyEventIds.includes(e.id)) : events;
+  if (!games.length) return { games: [], props: [], cost: 0, failures: [], estimate: estimateSlate([], markets) };
+
+  const estimate = estimateSlate(games, markets);
+  const quota = quotaStatus();
+
+  if (!force && quota.local_cap > 0 && quota.used_this_month + estimate.estimated_cost > quota.local_cap) {
+    throw new OddsApiError(
+      `Loading the full slate would cost ${estimate.estimated_cost} credits and push you past the ` +
+        `${quota.local_cap}-credit monthly cap (${quota.used_this_month} used). Load games one at a time, ` +
+        `trim your markets, or raise the cap in Commissioner → Odds API.`,
+      429
+    );
+  }
+
+  const props = [];
+  const loaded = [];
+  const failures = [];
+  let cost = 0;
+
+  // Sequential on purpose: the provider rate-limits, and a partial board with a
+  // named failure is far more useful than a burst that trips a 429 mid-slate.
+  for (const ev of games) {
+    try {
+      const res = await getEventProps(ev.id, { markets, force });
+      cost += res.cost || 0;
+      const label = `${ev.away_team} @ ${ev.home_team}`;
+      loaded.push({ ...ev, prop_count: res.props.length, cached: res.cached });
+      for (const p of res.props) {
+        props.push({
+          ...p,
+          event_id: ev.id,
+          home_team: ev.home_team,
+          away_team: ev.away_team,
+          commence_time: ev.commence_time,
+          game_label: label,
+        });
+      }
+    } catch (err) {
+      failures.push({ event_id: ev.id, game: `${ev.away_team} @ ${ev.home_team}`, error: err.message });
+    }
+  }
+
+  props.sort(
+    (a, b) =>
+      a.player.localeCompare(b.player) ||
+      a.market_label.localeCompare(b.market_label) ||
+      String(a.selection).localeCompare(String(b.selection))
+  );
+
+  return { games: loaded, props, cost, failures, estimate, quota: quotaStatus() };
+}
+
 /** Final scores, used to nudge admins that games are done. Costs 1-2 credits. */
 async function getScores({ daysFrom = 3, force = false } = {}) {
   const cacheKey = `scores:${daysFrom}`;
@@ -346,6 +435,8 @@ module.exports = {
   marketMeta,
   getEvents,
   getEventProps,
+  getSlateProps,
+  estimateSlate,
   getScores,
   quotaStatus,
   hasApiKey,

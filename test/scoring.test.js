@@ -184,3 +184,14 @@ test('a missed longshot anytime-TD is not treated as a total whiff', () => {
   const disaster = { result: 'loss', selection: 'Over', line: 228.5, actual_value: 18, price: -110 };
   assert.ok(s.bozoScore(disaster) > s.bozoScore(longshot));
 });
+
+test('the slate estimator charges only for uncached games', () => {
+  const odds = require('../server/odds');
+  const events = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const est = odds.estimateSlate(events, ['player_pass_yds', 'player_rush_yds']);
+  assert.strictEqual(est.games_total, 3);
+  assert.strictEqual(est.cost_per_game, 2, '2 markets x 1 region');
+  // Nothing is cached in a fresh process, so every game is billable.
+  assert.strictEqual(est.games_to_fetch, 3);
+  assert.strictEqual(est.estimated_cost, 6);
+});

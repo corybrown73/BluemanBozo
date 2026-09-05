@@ -43,6 +43,29 @@ router.get('/events/:eventId/props', async (req, res) => {
   }
 });
 
+// What a full-slate pull costs right now. Free — reads the cache, no API call.
+router.get('/slate/estimate', async (req, res) => {
+  try {
+    const { events } = await odds.getEvents();
+    const markets = req.query.markets ? String(req.query.markets).split(',') : null;
+    res.json(odds.estimateSlate(events, markets));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Every game's props in one board. Costs (uncached games x markets x regions).
+router.get('/slate', async (req, res) => {
+  try {
+    const markets = req.query.markets ? String(req.query.markets).split(',') : null;
+    const force = req.query.force === '1' && req.user.is_admin;
+    const result = await odds.getSlateProps({ markets, force });
+    res.json({ ...result, quota: odds.quotaStatus() });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 router.get('/scores', requireAdmin, async (req, res) => {
   try {
     const result = await odds.getScores({

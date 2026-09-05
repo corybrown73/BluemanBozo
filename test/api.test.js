@@ -279,3 +279,12 @@ test('signing out clears the session', async () => {
   const res = await call('GET', '/api/state');
   assert.strictEqual(res.status, 401);
 });
+
+test('the slate estimate prices the job without calling the API', async () => {
+  await call('POST', '/api/auth/login', { username: 'boss', password: 'password123' });
+  const res = await call('GET', '/api/odds/slate/estimate');
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.data.games_total, 0, 'no cached slate in a fresh test db');
+  assert.strictEqual(res.data.estimated_cost, 0);
+  assert.ok(res.data.cost_per_game > 0, 'cost per game reflects the enabled markets');
+});

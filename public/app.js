@@ -157,6 +157,9 @@ const S = {
   propsLoading: false,
   propFilter: '',
   selectedProp: null,
+  propSource: 'game',   // 'game' = one matchup | 'slate' = every game at once
+  slateEstimate: null,
+  slateLoading: false,
   // other views
   leaderboard: null,
   historyRows: null,
@@ -611,20 +614,59 @@ function viewPick() {
         <h2>1 · Pick a game</h2>
         <div class="spacer"></div>
         ${raw(quotaBar())}
-        <button class="btn sm ghost" id="refreshEvents" title="Reload the slate (free — costs no credits)">↻ Refresh</button>
+        <button class="btn sm ghost" id="refreshEvents" title="Reload the game list (free — costs no credits)">↻ Refresh</button>
       </div>
-      <p class="tiny faint" style="margin-top:-6px">Browsing games is free. Loading a game's props costs credits, so open only what you need.</p>
+      <p class="tiny faint" style="margin-top:-6px">Browsing games is free. Loading props costs credits.</p>
+      ${raw(slateBar())}
       <div id="eventList" class="grid three">${raw(eventListBody())}</div>
     </div>
 
-    ${raw(S.selectedEvent ? propBoard() : '')}
+    ${raw(S.selectedEvent || S.propSource === 'slate' || S.slateLoading ? propBoard() : '')}
 
     <div class="card">
-      <div class="card-head"><h2>${raw(S.selectedEvent ? '3' : '2')} · Or enter it by hand</h2></div>
+      <div class="card-head"><h2>${raw(
+        S.selectedEvent || S.propSource === 'slate' ? '3' : '2'
+      )} · Or enter it by hand</h2></div>
       <p class="tiny faint" style="margin-top:-6px">If the book you use has a number the API doesn't, type it in.</p>
       ${raw(manualForm())}
     </div>
   `;
+}
+
+/** The "load everything" control, with the price of the job stated up front. */
+function slateBar() {
+  if (S.eventsState !== 'ready' || !S.events.length) return '';
+  const est = S.slateEstimate;
+
+  if (S.slateLoading) {
+    return html`<div class="card tight" style="margin:12px 0 4px;border-color:rgba(59,130,246,.45)">
+      <div class="row"><div class="spinner" style="width:16px;height:16px;margin:0"></div>
+        <span class="tiny">Pulling every game… this takes a few seconds.</span></div>
+    </div>`;
+  }
+
+  const cost = est ? est.estimated_cost : null;
+  const cached = est ? est.games_cached : 0;
+
+  return html`<div class="card tight" style="margin:12px 0 4px">
+    <div class="row">
+      <span style="font-size:20px">🔎</span>
+      <div style="flex:1;min-width:180px">
+        <b class="tiny">Search every game at once</b>
+        <div class="tiny faint">${raw(
+          est
+            ? cost === 0
+              ? `All ${esc(est.games_total)} games already cached — free.`
+              : `${esc(est.games_to_fetch)} of ${esc(est.games_total)} games to fetch · ${esc(cost)} credits` +
+                (cached ? ` (${esc(cached)} already cached)` : '')
+            : 'Type a player name instead of hunting through matchups.'
+        )}</div>
+      </div>
+      <button class="btn sm ${raw(S.propSource === 'slate' ? '' : 'primary')}" id="loadSlate">
+        ${raw(S.propSource === 'slate' ? '↻ Reload all games' : '⚡ Load all games')}
+      </button>
+    </div>
+  </div>`;
 }
 
 function eventListBody() {
@@ -659,11 +701,12 @@ function eventListBody() {
 
 function propBoard() {
   const ev = S.selectedEvent;
-  if (S.propsLoading) {
+  if (S.propsLoading || S.slateLoading) {
     return html`<div class="card"><div class="card-head"><h2>2 · Pick a player prop</h2></div>
       <div class="empty"><div class="spinner"></div><p class="tiny faint" style="margin-top:10px">Pulling the board…</p></div></div>`;
   }
   if (!S.props) {
+    if (!ev) return '';
     return html`<div class="card">
       <div class="card-head"><h2>2 · Pick a player prop</h2></div>
       <div class="empty">
@@ -674,29 +717,68 @@ function propBoard() {
     </div>`;
   }
 
+  const slate = S.propSource === 'slate';
   const filter = S.propFilter.trim().toLowerCase();
-  const rows = S.props.props.filter(
-    (p) => !filter || p.player.toLowerCase().includes(filter) || p.market_label.toLowerCase().includes(filter)
+  const all = S.props.props;
+  const matched = all.filter(
+    (p) =>
+      !filter ||
+      p.player.toLowerCase().includes(filter) ||
+      p.market_label.toLowerCase().includes(filter) ||
+      (p.game_label || '').toLowerCase().includes(filter)
   );
+
+  // Whole-slate mode is for searching, not scrolling: a few hundred props makes
+  // a page tens of thousands of pixels tall. Show nothing until they type, then
+  // cap what comes back.
+  const awaitingSearch = slate && !filter;
+  const LIMIT = slate ? 80 : 250;
+  const rows = awaitingSearch ? [] : matched.slice(0, LIMIT);
+  const trimmed = matched.length - rows.length;
 
   const byGroup = {};
   for (const p of rows) (byGroup[p.market_label] = byGroup[p.market_label] || []).push(p);
 
-  const cacheNote = S.props.cached
+  const cacheNote = slate
+    ? S.props.cost === 0
+      ? `${S.props.games.length} games · all cached — free`
+      : `${S.props.games.length} games · cost ${S.props.cost} credits`
+    : S.props.cached
     ? `cached${S.props.fetched_at ? ' ' + fmtKickoff(S.props.fetched_at) : ''} — free`
     : `fresh — cost ${S.props.cost} credit${S.props.cost === 1 ? '' : 's'}`;
 
   return html`<div class="card">
     <div class="card-head">
       <h2>2 · Pick a player prop</h2>
-      <span class="badge">${ev.away_team} @ ${ev.home_team}</span>
+      <span class="badge">${raw(slate ? `${esc(all.length)} props · whole slate` : `${esc(ev.away_team)} @ ${esc(ev.home_team)}`)}</span>
       <div class="spacer"></div>
       <span class="tiny faint">${cacheNote}</span>
-      ${raw(S.user.is_admin ? '<button class="btn sm ghost" id="forceProps" title="Bypass the cache — costs credits">↻ Force</button>' : '')}
+      ${raw(!slate && S.user.is_admin ? '<button class="btn sm ghost" id="forceProps" title="Bypass the cache — costs credits">↻ Force</button>' : '')}
     </div>
-    <input id="propFilter" placeholder="Filter by player or market…" value="${S.propFilter}" style="margin-bottom:12px">
+    <input id="propFilter" placeholder="${raw(
+      slate ? 'Search any player, market or matchup…' : 'Filter by player or market…'
+    )}" value="${S.propFilter}" style="margin-bottom:12px">
     ${raw(
-      rows.length
+      S.props.failures && S.props.failures.length
+        ? html`<p class="tiny" style="color:#fbcb70">⚠️ ${S.props.failures.length} game${raw(
+            S.props.failures.length === 1 ? '' : 's'
+          )} could not be loaded: ${raw(S.props.failures.map((f) => esc(f.game)).join(', '))}</p>`
+        : ''
+    )}
+    ${raw(slate ? marketChips() : '')}
+    ${raw(
+      !awaitingSearch && trimmed > 0
+        ? html`<p class="tiny faint">Showing ${rows.length} of ${matched.length} matches — keep typing to narrow it down.</p>`
+        : ''
+    )}
+    ${raw(
+      awaitingSearch
+        ? html`<div class="empty" style="padding:30px 20px">
+            <div class="big">🔎</div>
+            <p class="muted"><b>${all.length}</b> props across <b>${S.props.games.length}</b> games are loaded.</p>
+            <p class="tiny faint">Type a player's name above — or tap a market to browse it.</p>
+          </div>`
+        : rows.length
         ? Object.entries(byGroup)
             .map(
               ([label, list]) => html`<div style="margin-bottom:16px">
@@ -709,9 +791,9 @@ function propBoard() {
                       return html`<button class="proprow ${sel ? 'selected' : ''}" data-prop="${idx}">
                         <div class="pname">
                           <b>${p.player}</b>
-                          <small>${p.selection}${raw(p.line !== null && p.line !== undefined ? ' ' + esc(p.line) : '')} · ${p.bookmaker}${raw(
-                            p.book_count > 1 ? ` +${esc(p.book_count - 1)} more` : ''
-                          )}</small>
+                          <small>${p.selection}${raw(p.line !== null && p.line !== undefined ? ' ' + esc(p.line) : '')} · ${raw(
+                            p.game_label ? `${esc(p.game_label)} · ` : ''
+                          )}${p.bookmaker}${raw(p.book_count > 1 ? ` +${esc(p.book_count - 1)} more` : '')}</small>
                         </div>
                         <div class="pline">${raw(p.line !== null && p.line !== undefined ? esc(p.line) : '—')}</div>
                         <div class="pprice">${oddsStr(p.price)}</div>
@@ -734,6 +816,25 @@ function propBoard() {
           </button>`
         : ''
     )}
+  </div>`;
+}
+
+/** One chip per market on the loaded board — tap to browse that market slate-wide. */
+function marketChips() {
+  const counts = new Map();
+  for (const p of S.props.props) counts.set(p.market_label, (counts.get(p.market_label) || 0) + 1);
+  const active = S.propFilter.trim().toLowerCase();
+  return html`<div class="tabs" style="padding:0 0 12px;flex-wrap:wrap">
+    ${raw(
+      [...counts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(
+          ([label, n]) => html`<button class="tab ${active === label.toLowerCase() ? 'active' : ''}"
+            data-chip="${label}" style="font-size:12px;padding:6px 12px">${label} <span class="faint">${n}</span></button>`
+        )
+        .join('')
+    )}
+    ${raw(active ? '<button class="tab" data-chip="" style="font-size:12px;padding:6px 12px">✕ Clear</button>' : '')}
   </div>`;
 }
 
@@ -773,6 +874,7 @@ async function loadEvents(force = false, { rerender = false } = {}) {
     S.eventsMeta = data;
     S.quota = data.quota || S.quota;
     S.eventsState = 'ready';
+    S.slateEstimate = null;
     if (data.error) {
       S.eventsError = data.error;
       toast(data.error, 'err', 6000);
@@ -805,6 +907,52 @@ async function loadProps(force = false) {
   }
 }
 
+async function loadSlateEstimate() {
+  try {
+    S.slateEstimate = await api('/api/odds/slate/estimate');
+    if (S.tab === 'pick') render();
+  } catch {
+    S.slateEstimate = null;
+  }
+}
+
+async function loadSlate(force = false) {
+  const est = S.slateEstimate;
+  if (est && est.estimated_cost > 0) {
+    const ok = confirm(
+      `Load props for ${est.games_to_fetch} game${est.games_to_fetch === 1 ? '' : 's'}?\n\n` +
+        `Cost: ${est.estimated_cost} credits (${est.cost_per_game} per game × ${est.markets} markets).\n` +
+        `Used so far this month: ${est.quota.used_this_month} of ${est.quota.local_cap}.`
+    );
+    if (!ok) return;
+  }
+
+  S.slateLoading = true;
+  S.selectedProp = null;
+  render();
+  try {
+    const data = await api('/api/odds/slate' + (force ? '?force=1' : ''));
+    S.props = data;
+    S.propSource = 'slate';
+    S.selectedEvent = null;
+    S.quota = data.quota || S.quota;
+    S.slateEstimate = data.estimate ? { ...data.estimate, quota: data.quota } : S.slateEstimate;
+    toast(
+      data.cost === 0
+        ? `${data.props.length} props loaded from cache — free.`
+        : `${data.props.length} props across ${data.games.length} games — ${data.cost} credits.`,
+      'ok'
+    );
+    if (data.failures?.length) toast(`${data.failures.length} game(s) failed to load.`, 'err', 6000);
+  } catch (err) {
+    toast(err.message, 'err', 8000);
+  } finally {
+    S.slateLoading = false;
+    render();
+    loadSlateEstimate();
+  }
+}
+
 async function submitPick(body) {
   try {
     S.week = await api(`/api/weeks/${S.week.week.id}/picks`, {
@@ -825,6 +973,11 @@ function wirePick() {
   const retry = $('#retryEvents');
   if (retry) retry.addEventListener('click', () => loadEvents(false, { rerender: true }));
 
+  const slateBtn = $('#loadSlate');
+  if (slateBtn) slateBtn.addEventListener('click', () => loadSlate(false));
+  // Price the job as soon as the games are on screen, so the button can say what it costs.
+  if (S.eventsState === 'ready' && S.events.length && !S.slateEstimate && !S.slateLoading) loadSlateEstimate();
+
   const refresh = $('#refreshEvents');
   if (refresh) {
     refresh.addEventListener('click', async () => {
@@ -836,6 +989,7 @@ function wirePick() {
   $$('#eventList [data-event]').forEach((btn) =>
     btn.addEventListener('click', () => {
       S.selectedEvent = S.events.find((e) => e.id === btn.dataset.event) || null;
+      S.propSource = 'game';
       S.props = null;
       S.selectedProp = null;
       S.propFilter = '';
@@ -864,6 +1018,14 @@ function wirePick() {
     });
   }
 
+  $$('[data-chip]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      S.propFilter = btn.dataset.chip;
+      S.selectedProp = null;
+      render();
+    })
+  );
+
   $$('[data-prop]').forEach((btn) =>
     btn.addEventListener('click', () => {
       S.selectedProp = Number(btn.dataset.prop);
@@ -875,11 +1037,13 @@ function wirePick() {
   if (submitProp) {
     submitProp.addEventListener('click', () => {
       const p = S.props.props[S.selectedProp];
+      // In slate mode there is no selectedEvent — the game rides on the prop.
+      const game = S.selectedEvent || p;
       submitPick({
-        event_id: S.selectedEvent.id,
-        home_team: S.selectedEvent.home_team,
-        away_team: S.selectedEvent.away_team,
-        commence_time: S.selectedEvent.commence_time,
+        event_id: game.event_id || game.id,
+        home_team: game.home_team,
+        away_team: game.away_team,
+        commence_time: game.commence_time,
         player: p.player,
         market: p.market,
         market_label: p.market_label,
@@ -1375,14 +1539,16 @@ function viewAdmin() {
           )}</b></p>
           <label class="field"><span>Monthly credit cap</span>
             <input id="sCap" type="number" min="0" value="${settings.monthly_credit_cap}"></label>
-          <p class="tiny faint" style="margin-top:-6px">The app refuses paid calls past this. The free tier is 500/month.</p>
+          <p class="tiny faint" style="margin-top:-6px">The app refuses paid calls past this. Free tier is 500/month; the paid tier is 20,000. Keep the cap a little under your real plan.</p>
           <label class="field"><span>Props cache (minutes)</span>
             <input id="sCache" type="number" min="1" value="${settings.props_cache_minutes}"></label>
-          <p class="tiny faint" style="margin-top:-6px">Longer cache = fewer credits. One fetch serves everybody.</p>
+          <p class="tiny faint" style="margin-top:-6px">Longer cache = fewer credits, staler lines. One fetch serves everybody.</p>
         </div>
         <div>
           <span class="eyebrow">Prop markets to load</span>
-          <p class="tiny faint">Each market costs 1 credit per game loaded. Keep this tight.</p>
+          <p class="tiny faint">Each market costs 1 credit per game loaded. Loading all ${raw(
+        S.events?.length || 16
+      )} games costs that many × the number of games.</p>
           <div style="max-height:230px;overflow-y:auto;padding-right:6px;margin-top:8px">
             ${raw(
               (S.marketCatalog || [])

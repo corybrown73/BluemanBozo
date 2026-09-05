@@ -16,7 +16,7 @@ Replaces the Google Sheet. Keeps the receipts.
 | | |
 |---|---|
 | 🔒 **Private** | Every page is behind a login. One account per member. |
-| 🏈 **Live NFL props** | Pulls player prop lines from [The Odds API](https://the-odds-api.com) — browse games, load a board, click your pick. |
+| 🏈 **Live NFL props** | Pulls player prop lines from [The Odds API](https://the-odds-api.com). Load one game, or the whole slate at once and search any player by name. |
 | 🙈 **Blind picks** | Nobody sees anyone else's pick until the week locks, so you can't fade the group. |
 | 🎫 **The ticket** | Every pick becomes a parlay leg. Real combined odds, real payout math. |
 | 📋 **Grading** | Enter the actual stat line; win/loss/push is computed. No arguing about it. |
@@ -74,37 +74,44 @@ node scripts/check-odds.js --props    # also pulls one real board (spends credit
 
 ---
 
-## About the 500 free credits
+## Credits and what they buy
 
-The free tier gives you **500 credits per month**, and the pricing is per market:
+The Odds API bills per market, not per call:
 
 | Call | Cost |
 |---|---|
 | List the week's games | **0 credits** — free, refresh all you want |
 | Load one game's props | **1 credit per market, per region** |
+| Load the whole slate | that, times the number of games |
 | Final scores | 1–2 credits |
 
-With the default 6 markets, **one game's board costs 6 credits.** That's the number
-that matters. If you loaded all 16 games every week you'd spend 384/month and be
-done by mid-October.
+With the default **10 markets**, one game's board is **10 credits** and a full
+16-game slate is **~160**. On the 20,000/month tier that's about 125 full-slate
+refreshes a month — you will not run out.
 
-**The app is built so that doesn't happen:**
+**Two ways to pick, and they cost differently:**
 
-- Props load **one game at a time**, only when someone opens that game.
-- Every response is **cached in SQLite for 6 hours and shared by the whole group** —
-  if five of you open the Chiefs game, that's 6 credits total, not 30.
-- A **local monthly cap** (default 400) blocks paid calls before they're made.
-- The credit meter is visible in the header, and **Commissioner → Odds API** shows
-  the full spend breakdown.
+- **Load all games** — one button, pulls every game, then you just type a player's
+  name. No hunting through matchups. Costs ~160 credits, and the app tells you the
+  exact price before it spends anything.
+- **Click one game** — costs 10 credits. Fine when you already know the matchup.
 
-Realistic usage — everyone picks from ~4 games a week — is about **96 credits/month.**
-Comfortably inside the free tier.
+Either way, **every response is cached for 3 hours and shared by the whole group.**
+If five of you open the board after someone loads the slate, that's still 160
+credits total, not 800. The slate loader also charges nothing for games already
+cached, so a second click right after the first is free.
 
-**To stretch it further:** turn off markets you never pick in Commissioner → Odds API.
-Dropping from 6 markets to 3 halves your cost per game. **If you outgrow it,** the
-$30/month tier is 20,000 credits, which is effectively unlimited for six people.
+Spend controls that stay on regardless:
 
----
+- A **local monthly cap** (default 16,000 — a margin under the 20k plan) blocks
+  paid calls before they go out, and the slate loader refuses a job that would
+  breach it.
+- The credit meter sits in the header. **Commissioner → Odds API** shows the full
+  spend breakdown by endpoint and month.
+
+**On the free tier instead?** Set `monthly_credit_cap` to **400** and trim to ~4
+markets in Commissioner → Odds API. Then load games one at a time rather than the
+whole slate — that keeps you near 60 credits a month, well inside the 500.
 
 ## How a week runs
 
@@ -117,8 +124,9 @@ picks hidden   parlay priced     voting open      bill assigned
 1. **Commissioner → Open the next week.** Last week's bozo is automatically put on
    the hook for this week's ticket. Optionally set an auto-lock time (kickoff) —
    the week locks itself.
-2. **Everyone makes a pick.** *Make a Pick* → choose a game → choose a prop.
-   Or type it in by hand if your book has a number the API doesn't.
+2. **Everyone makes a pick.** *Make a Pick* → either **Load all games** and search
+   for your guy by name, or click a single matchup. Or type it in by hand if your
+   book has a number the API doesn't.
 3. **Lock it** (or let auto-lock do it). All picks are revealed and the parlay
    gets priced.
 4. **Games play.** Whoever is on the hook places the bet.
