@@ -78,8 +78,13 @@ app.get('*', auth.requireAuth, (req, res) => {
 /* ---------------- errors ---------------- */
 
 app.use((err, req, res, next) => {
-  console.error('[error]', err);
   if (res.headersSent) return next(err);
+  // body-parser and friends set err.status for client mistakes (bad JSON, too
+  // large). Those are 4xx and not worth a stack trace in the log.
+  if (err.status && err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.type === 'entity.parse.failed' ? 'That request body is not valid JSON.' : err.message });
+  }
+  console.error('[error]', err);
   res.status(500).json({ error: 'Something broke on our end.' });
 });
 

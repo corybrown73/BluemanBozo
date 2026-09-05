@@ -32,6 +32,8 @@ const CATCHUP_HOURS = { open: 36, mid: 30, final: 14 };
 
 let tasks = [];
 let sweeper = null;
+/** Jobs currently executing — a sweep tick landing mid-send must not double it. */
+const inFlight = new Set();
 
 /* ---------------- run bookkeeping ---------------- */
 
@@ -100,14 +102,48 @@ function ensureWeekForOpen() {
  * @param {'open'|'mid'|'final'} jobKey
  * @param {object} opts  { dryRun } — dryRun builds and returns without sending
  */
-async function runJob(jobKey, { dryRun = false, late = false } = {}) {
+async function runJob(jobKey, { dryRun = false, late = false, force = false } = {}) {
   const job = JOBS.find((j) => j.key === jobKey);
   if (!job) throw new Error(`Unknown job: ${jobKey}`);
 
-  const week = jobKey === 'open' ? ensureWeekForOpen() : currentWeek();
-  if (!week) {
-    if (!dryRun) recordRun(jobKey, { status: 'skipped', detail: 'No week to report on.' });
-    return { ok: false, skipped: true, reason: 'No open week.' };
+  if (dryRun) return runJobInner(job, { dryRun, late });
+
+  if (inFlight.has(jobKey)) return { ok: false, skipped: true, reason: `${jobKey} is already running.` };
+  inFlight.add(jobKey);
+  try {
+    // Scheduled and catch-up sends are once per week; a manual "Send now" may repeat.
+    if (!force) {
+      const wk = currentWeek();
+      if (wk && alreadyRanForWeek(jobKey, wk.id)) {
+        return { ok: false, skipped: true, reason: `${jobKey} already went out for week ${wk.week_number}.` };
+      }
+    }
+    return await runJobInner(job, { dryRun, late });
+  } finally {
+    inFlight.delete(jobKey);
+  }
+}
+
+async function runJobInner(job, { dryRun, late }) {
+  const jobKey = job.key;
+
+  let week = jobKey === 'open' ? ensureWeekForOpen() : currentWeek();
+
+  // currentWeek() falls back to the latest FINAL week when nothing is live.
+  // Emailing "Week 3 is open!" about a finished week, or re-pricing a dead
+  // ticket for the payer, is worse than sending nothing.
+  if (!week || week.status === 'final' || (jobKey === 'open' && week.status !== 'open')) {
+    const reason = !week ? 'No week to report on.' : `Week ${week.week_number} is ${week.status}.`;
+    if (!dryRun) recordRun(jobKey, { status: 'skipped', detail: reason });
+    return { ok: false, skipped: true, reason };
+  }
+
+  // The placement sheet names every leg. That is the moment picks stop being
+  // secret, so Saturday locks the week before it says a word — which is also
+  // what "final" means.
+  if (jobKey === 'final' && week.status === 'open' && !dryRun) {
+    db.prepare("UPDATE weeks SET status = 'locked' WHERE id = ? AND status = 'open'").run(week.id);
+    week = game.getWeek(week.id);
   }
 
   // Thursday only spends credits if explicitly told to.
@@ -177,8 +213,10 @@ function lastScheduledTime(expr, now = new Date()) {
   const [min, hour, , , dow] = expr.trim().split(/\s+/);
   const minute = parseInt(min, 10);
   const hours = parseInt(hour, 10);
-  const days = dow === '*' ? null : dow.split(',').map((d) => parseInt(d, 10));
-  if (!Number.isFinite(minute) || !Number.isFinite(hours)) return null;
+  const days = parseDays(dow);
+  // Step forms (*/2) are valid cron but not something this app schedules;
+  // catch-up simply doesn't apply to them. The cron task itself still fires.
+  if (!Number.isFinite(minute) || !Number.isFinite(hours) || days === false) return null;
 
   const tz = getSetting('schedule_timezone') || 'America/New_York';
 
@@ -191,14 +229,35 @@ function lastScheduledTime(expr, now = new Date()) {
     const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(get('weekday'));
     if (days && !days.includes(wd)) continue;
 
-    // Build the instant for that local date+time by probing the offset.
+    // Build the instant for that local date+time. The offset depends on the
+    // instant (DST), so probe once at a naive guess, then again at the result —
+    // the second pass is what keeps a 3am job honest on a transition Sunday.
     const iso = `${get('year')}-${get('month')}-${get('day')}T${String(hours).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
-    const guess = new Date(`${iso}Z`);
-    const offsetMin = tzOffsetMinutes(tz, guess);
-    const actual = new Date(guess.getTime() + offsetMin * 60000);
+    const naive = new Date(`${iso}Z`);
+    let actual = new Date(naive.getTime() + tzOffsetMinutes(tz, naive) * 60000);
+    actual = new Date(naive.getTime() + tzOffsetMinutes(tz, actual) * 60000);
     if (actual.getTime() <= now.getTime()) return actual;
   }
   return null;
+}
+
+/** "2", "2,4", "1-5", "*" → array of weekday numbers; null for *; false for unsupported. */
+function parseDays(field) {
+  if (field === '*' || field === undefined) return null;
+  const out = [];
+  for (const token of field.split(',')) {
+    const range = token.match(/^(\d)-(\d)$/);
+    if (range) {
+      for (let d = Number(range[1]); d <= Number(range[2]); d++) out.push(d);
+      continue;
+    }
+    if (/^\d$/.test(token)) {
+      out.push(Number(token));
+      continue;
+    }
+    return false;
+  }
+  return out;
 }
 
 /** Minutes to add to a UTC-interpreted local time to get the real instant. */
@@ -243,7 +302,7 @@ function start() {
     const task = cron.schedule(
       expr,
       () => {
-        runJob(job.key).catch((err) => {
+        runJob(job.key, { force: false }).catch((err) => {
           console.error(`[scheduler] ${job.key} failed:`, err.message);
           recordRun(job.key, { status: 'failed', detail: err.message });
         });
@@ -299,4 +358,4 @@ function status() {
   };
 }
 
-module.exports = { start, stop, status, runJob, catchUp, lastScheduledTime, JOBS };
+module.exports = { start, stop, status, runJob, catchUp, lastScheduledTime, parseDays, JOBS };

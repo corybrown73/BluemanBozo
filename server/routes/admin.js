@@ -55,9 +55,12 @@ router.patch('/users/:id', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!user) return res.status(404).json({ error: 'Member not found.' });
 
+  const LIMITS = { display_name: 40, email: 120, phone: 24, avatar: 8, venmo: 40 };
   const updates = {};
-  for (const key of ['display_name', 'email', 'phone', 'avatar', 'venmo']) {
-    if (req.body?.[key] !== undefined) updates[key] = req.body[key] === '' ? null : String(req.body[key]).slice(0, 200);
+  for (const key of Object.keys(LIMITS)) {
+    if (req.body?.[key] === undefined) continue;
+    const value = req.body[key] === '' || req.body[key] === null ? null : String(req.body[key]);
+    updates[key] = value === null ? null : value.replace(/[\u0000-\u001f]/g, '').slice(0, LIMITS[key]);
   }
   if (req.body?.is_admin !== undefined) {
     // Don't let the last commissioner demote themselves out of the building.
@@ -132,13 +135,14 @@ const EDITABLE_SETTINGS = new Set([
 
 router.get('/settings', (req, res) => {
   const settings = allSettings();
-  // Never ship the key back to the browser — just whether one is set.
-  const hasKey = Boolean((settings.odds_api_key || process.env.ODDS_API_KEY || '').trim());
+  // Never ship the key back to the browser — just whether one is set, and where from.
+  const dbKey = (settings.odds_api_key || '').trim();
+  const envKey = (process.env.ODDS_API_KEY || '').trim();
   delete settings.odds_api_key;
   res.json({
     settings,
-    odds_api_key_set: hasKey,
-    odds_api_key_source: settings.odds_api_key ? 'database' : process.env.ODDS_API_KEY ? 'environment' : 'none',
+    odds_api_key_set: Boolean(dbKey || envKey),
+    odds_api_key_source: dbKey ? 'database' : envKey ? 'environment' : 'none',
     quota: odds.quotaStatus(),
     channels: notify.channelStatus(),
     available_markets: odds.MARKETS,
@@ -218,7 +222,7 @@ router.post('/schedule/preview/:job', async (req, res) => {
 /** Fire a job now, for real. */
 router.post('/schedule/run/:job', async (req, res) => {
   try {
-    const result = await scheduler.runJob(req.params.job);
+    const result = await scheduler.runJob(req.params.job, { force: true });
     if (!result.ok) return res.status(400).json({ error: result.reason || 'Nothing to send.' });
     res.json({
       ok: true,

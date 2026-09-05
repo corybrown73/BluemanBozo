@@ -52,10 +52,15 @@ router.post('/change-password', auth.requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+const PROFILE_LIMITS = { display_name: 40, email: 120, phone: 24, avatar: 8, venmo: 40 };
+
 router.patch('/profile', auth.requireAuth, (req, res) => {
   const fields = {};
-  for (const key of ['display_name', 'email', 'phone', 'avatar', 'venmo']) {
-    if (key in (req.body || {})) fields[key] = req.body[key] === '' ? null : String(req.body[key]).slice(0, 200);
+  for (const key of Object.keys(PROFILE_LIMITS)) {
+    if (!(key in (req.body || {}))) continue;
+    const value = req.body[key] === '' || req.body[key] === null ? null : String(req.body[key]);
+    // Output is escaped everywhere; this just keeps a "name" from being a novel.
+    fields[key] = value === null ? null : value.replace(/[\u0000-\u001f]/g, '').slice(0, PROFILE_LIMITS[key]);
   }
   if (fields.display_name === null || fields.display_name === '') {
     return res.status(400).json({ error: 'Display name cannot be empty.' });

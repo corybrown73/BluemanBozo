@@ -210,13 +210,15 @@ function weekDetail(weekId, viewer) {
     // question, answered without anyone having to ask it.
     roster: listUsers().map((u) => {
       const mine = picksRaw.find((p) => p.user_id === u.id);
+      const shown = mine ? picks.find((p) => p.id === mine.id) : null;
       return {
         id: u.id,
         display_name: u.display_name,
         avatar: u.avatar,
         picked: Boolean(mine),
         picked_at: mine ? mine.created_at : null,
-        result: mine ? mine.result : null,
+        // Same masking the pick itself gets: hidden picks read as pending.
+        result: shown ? shown.result : null,
         is_payer: week.payer_user_id === u.id,
       };
     }),
@@ -227,6 +229,7 @@ function weekDetail(weekId, viewer) {
 function leaderboard({ seasonId = null } = {}) {
   const users = listUsers({ includeInactive: true });
   const season = seasonId ? db.prepare('SELECT * FROM seasons WHERE id = ?').get(seasonId) : activeSeason();
+  if (!season) return null;
 
   const rows = users.map((u) => {
     const counts = bozoCounts(u.id, season.id);

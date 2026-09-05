@@ -247,6 +247,36 @@ function buildMid({ weekId, moves, injuryFlags, injuryChecked }) {
   };
 }
 
+/** Thursday while picks are still secret: who's missing, and nothing that identifies a pick. */
+function buildMidBlind(weekId) {
+  const detail = game.weekDetail(weekId, { id: 0, is_admin: true });
+  const w = detail.week;
+  const site = getSetting('site_url', process.env.SITE_URL || '');
+  const missing = detail.missing_picks.map((m) => m.display_name);
+  const inCount = detail.picks.length;
+  const total = inCount + missing.length;
+
+  const lines = [
+    `📊 WEEK ${w.week_number} MIDWEEK CHECK-IN`,
+    '',
+    missing.length
+      ? `⏰ ${inCount} of ${total} in. STILL MISSING: ${missing.join(', ')} — get in before it locks.`
+      : `✅ All ${total} picks are in.`,
+    '',
+    'Picks stay hidden until the week locks. Line movement and injury news for',
+    "everyone's guys come with Saturday's placement sheet.",
+    '',
+    site ? site : '',
+  ];
+
+  return {
+    subject: `📊 Week ${w.week_number} — ${missing.length ? `${missing.length} still missing` : 'everyone is in'}`,
+    text: lines.join('\n').replace(/\n{3,}/g, '\n\n').trim(),
+    week: w,
+    detail,
+  };
+}
+
 function buildFinal({ weekId, moves, injuryFlags }) {
   const detail = game.weekDetail(weekId, { id: 0, is_admin: true });
   const w = detail.week;
@@ -323,6 +353,15 @@ async function build(kind, weekId, { force = false } = {}) {
 
   if (kind === 'open') {
     return { ...buildOpen(weekId), kind, cost: 0, credits: 0 };
+  }
+
+  // While picks are still hidden from each other, the midweek note can't name
+  // anyone's player without giving the pick away. It sends the nag and the
+  // injury count only; the full report arrives once the week locks.
+  const picksHidden =
+    getSetting('hide_picks_until_lock') === '1' && game.statusRank(week.status) < game.statusRank('locked');
+  if (kind === 'mid' && picksHidden) {
+    return { ...buildMidBlind(weekId), kind, cost: 0, credits: 0, moves: [], injury_flags: [] };
   }
 
   const refreshed = await refreshPickLines(weekId, { force });

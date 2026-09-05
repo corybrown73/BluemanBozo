@@ -32,10 +32,16 @@ router.get('/events', async (req, res) => {
   }
 });
 
+/** Only the commissioner may widen the market list — it multiplies the credit cost. */
+function requestedMarkets(req) {
+  if (!req.user.is_admin || !req.query.markets) return null;
+  return String(req.query.markets).split(',');
+}
+
 // Costs (markets x regions) credits on a cache miss.
 router.get('/events/:eventId/props', async (req, res) => {
   try {
-    const markets = req.query.markets ? String(req.query.markets).split(',') : null;
+    const markets = requestedMarkets(req);
     const force = req.query.force === '1' && req.user.is_admin;
     const result = await odds.getEventProps(req.params.eventId, { markets, force });
     res.json({ ...result, quota: odds.quotaStatus() });
@@ -48,7 +54,7 @@ router.get('/events/:eventId/props', async (req, res) => {
 router.get('/slate/estimate', async (req, res) => {
   try {
     const { events } = await odds.getEvents();
-    const markets = req.query.markets ? String(req.query.markets).split(',') : null;
+    const markets = requestedMarkets(req);
     res.json(odds.estimateSlate(events, markets));
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -58,7 +64,7 @@ router.get('/slate/estimate', async (req, res) => {
 // Every game's props in one board. Costs (uncached games x markets x regions).
 router.get('/slate', async (req, res) => {
   try {
-    const markets = req.query.markets ? String(req.query.markets).split(',') : null;
+    const markets = requestedMarkets(req);
     const force = req.query.force === '1' && req.user.is_admin;
     const result = await odds.getSlateProps({ markets, force });
     res.json({ ...result, quota: odds.quotaStatus() });

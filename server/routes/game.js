@@ -177,8 +177,15 @@ router.post('/weeks/:id/picks', (req, res) => {
 
   const limit = parseInt(getSetting('picks_per_user'), 10) || 1;
   const existing = db.prepare('SELECT COUNT(*) AS n FROM picks WHERE week_id = ? AND user_id = ?').get(week.id, targetUserId).n;
-  const replacing = body.pick_id ? db.prepare('SELECT * FROM picks WHERE id = ?').get(body.pick_id) : null;
-
+  // The pick being replaced must belong to THIS week. Without the week_id
+  // constraint a member could aim an open week's URL at their pick from a
+  // locked week and rewrite a loser into a winner before grading.
+  const replacing = body.pick_id
+    ? db.prepare('SELECT * FROM picks WHERE id = ? AND week_id = ?').get(body.pick_id, week.id)
+    : null;
+  if (body.pick_id && !replacing) {
+    return res.status(404).json({ error: 'That pick is not in this week.' });
+  }
   if (replacing && replacing.user_id !== targetUserId && !req.user.is_admin) {
     return res.status(403).json({ error: "That's not your pick." });
   }
@@ -211,7 +218,7 @@ router.post('/weeks/:id/picks', (req, res) => {
       `UPDATE picks SET event_id=@event_id, home_team=@home_team, away_team=@away_team, commence_time=@commence_time,
         player=@player, market=@market, market_label=@market_label, selection=@selection, line=@line, price=@price,
         bookmaker=@bookmaker, line_source=@line_source, trash_talk=@trash_talk, updated_at=datetime('now')
-       WHERE id=@id`
+       WHERE id=@id AND week_id=@week_id`
     ).run({ ...payload, id: replacing.id });
   } else {
     db.prepare(
@@ -230,7 +237,7 @@ router.post('/weeks/:id/picks', (req, res) => {
 router.delete('/picks/:id', (req, res) => {
   const pick = db.prepare('SELECT * FROM picks WHERE id = ?').get(parseInt(req.params.id, 10));
   if (!pick) return res.status(404).json({ error: 'Pick not found.' });
-  const week = game.getWeek(pick.week_id);
+  const week = applyAutoLock(game.getWeek(pick.week_id));
   if (pick.user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: "That's not your pick." });
   if (week.status !== 'open' && !req.user.is_admin) return res.status(409).json({ error: 'Too late — picks are locked.' });
 
@@ -358,7 +365,12 @@ router.post('/weeks/:id/bozo', requireAdmin, (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(resolution.user_id);
   if (!user) return res.status(400).json({ error: 'That person is not in the group.' });
 
-  const careerCount = game.bozoCounts(user.id, week.season_id).all_time + 1;
+  // Count every OTHER week's bozos, then add this one — re-crowning the same
+  // person must not count their existing row for this week twice.
+  const priorCount = db
+    .prepare('SELECT COUNT(*) AS n FROM bozos WHERE user_id = ? AND week_id <> ?')
+    .get(user.id, week.id).n;
+  const careerCount = priorCount + 1;
   const losingPick = picks.find((p) => p.user_id === user.id && p.result === 'loss') || null;
   const roastLine =
     req.body?.roast?.trim() ||
@@ -393,8 +405,10 @@ router.post('/weeks/:id/bozo', requireAdmin, (req, res) => {
 router.delete('/weeks/:id/bozo', requireAdmin, (req, res) => {
   const week = game.getWeek(parseInt(req.params.id, 10));
   if (!week) return res.status(404).json({ error: 'Week not found.' });
+  if (!game.getBozo(week.id)) return res.status(404).json({ error: 'No bozo to remove for this week.' });
   db.prepare('DELETE FROM bozos WHERE week_id = ?').run(week.id);
-  db.prepare("UPDATE weeks SET status = 'graded' WHERE id = ?").run(week.id);
+  // Only a final week steps back to graded. Anything earlier keeps its status.
+  db.prepare("UPDATE weeks SET status = 'graded' WHERE id = ? AND status = 'final'").run(week.id);
   db.prepare('UPDATE weeks SET payer_user_id = NULL WHERE season_id = ? AND week_number = ?').run(
     week.season_id,
     week.week_number + 1
@@ -470,6 +484,11 @@ router.post('/weeks/:id/notify', requireAdmin, async (req, res) => {
 router.get('/weeks/:id/summons', (req, res) => {
   const week = game.getWeek(parseInt(req.params.id, 10));
   if (!week) return res.status(404).json({ error: 'Week not found.' });
+  // The summons lists everyone's pick by name. Before lock that is exactly the
+  // information the game hides, so members get it only once the week is locked.
+  if (!req.user.is_admin && game.statusRank(week.status) < game.statusRank('locked')) {
+    return res.status(409).json({ error: 'Picks are still hidden — the summons is available once the week locks.' });
+  }
   const bozo = game.getBozo(week.id);
   const picks = game.rawPicks(week.id).map(game.decoratePick);
   const parlayInfo = scoring.parlay(picks, week.stake_cents);
@@ -507,7 +526,9 @@ router.get('/weeks/:id/summons', (req, res) => {
 
 router.get('/leaderboard', (req, res) => {
   const seasonId = req.query.season_id ? parseInt(req.query.season_id, 10) : null;
-  res.json(game.leaderboard({ seasonId }));
+  const board = game.leaderboard({ seasonId });
+  if (!board) return res.status(404).json({ error: 'Season not found.' });
+  res.json(board);
 });
 
 module.exports = router;

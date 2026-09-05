@@ -69,7 +69,16 @@ function parseCookies(header) {
   for (const part of header.split(';')) {
     const i = part.indexOf('=');
     if (i === -1) continue;
-    out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    const rawValue = part.slice(i + 1).trim();
+    // A malformed percent-escape from any other cookie on the domain must not
+    // take the whole site down with a URIError from global middleware.
+    let value;
+    try {
+      value = decodeURIComponent(rawValue);
+    } catch {
+      value = rawValue;
+    }
+    out[part.slice(0, i).trim()] = value;
   }
   return out;
 }

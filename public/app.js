@@ -1750,7 +1750,7 @@ function viewHistory() {
       S.historyRows
         .map(
           (w) => html`<div class="pickrow" style="cursor:pointer" data-week="${w.id}">
-            <span class="av">${raw(w.bozo_avatar || '⏳')}</span>
+            <span class="av">${w.bozo_avatar || '⏳'}</span>
             <div class="who">
               <b>${w.year} · Week ${w.week_number} ${raw(
                 w.bozo_name ? `— <span style="color:#ff9a9a">${esc(w.bozo_name)}</span>` : '<span class="faint">in progress</span>'
@@ -1846,7 +1846,7 @@ function viewAdmin() {
                 <input id="wStake" type="number" step="1" min="0" value="${raw((w.stake_cents / 100).toFixed(2))}"></label>
               <label class="field"><span>Auto-lock at</span>
                 <input id="wLock" type="datetime-local" value="${raw(toLocalInput(w.lock_at))}"></label>
-              <label class="field"><span>Label</span><input id="wLabel" value="${raw(w.label || '')}" placeholder="Divisional round"></label>
+              <label class="field"><span>Label</span><input id="wLabel" value="${w.label || ''}" placeholder="Divisional round"></label>
             </div>
             <button class="btn sm" id="saveWeek">Save week settings</button>`
           : '<p class="muted tiny">No week open.</p>'
@@ -1952,7 +1952,7 @@ function viewAdmin() {
       <div class="grid two">
         <label class="field"><span>Group name</span><input id="sGroup" value="${settings.group_name}"></label>
         <label class="field"><span>Site URL (used in messages)</span>
-          <input id="sSite" value="${raw(settings.site_url || '')}" placeholder="https://www.bluemanbozo.com"></label>
+          <input id="sSite" value="${settings.site_url || ''}" placeholder="https://www.bluemanbozo.com"></label>
         <label class="field"><span>Picks per person per week</span>
           <input id="sPicks" type="number" min="1" max="10" value="${settings.picks_per_user}"></label>
         <label class="field"><span>Default stake ($)</span>
@@ -2370,12 +2370,12 @@ function memberModal(user) {
         ? html`<label class="field"><span>Username</span><input id="fUsername" autocapitalize="none" placeholder="dave"></label>`
         : ''
     )}
-    <label class="field"><span>Display name</span><input id="fDisplay" value="${raw(user?.display_name || '')}"></label>
+    <label class="field"><span>Display name</span><input id="fDisplay" maxlength="40" value="${user?.display_name || ''}"></label>
     <div class="grid two">
-      <label class="field"><span>Emoji</span><input id="fAvatar" maxlength="4" value="${raw(user?.avatar || '🤡')}"></label>
-      <label class="field"><span>Venmo</span><input id="fVenmo" value="${raw(user?.venmo || '')}" placeholder="@dave-smith"></label>
-      <label class="field"><span>Email</span><input id="fEmail" type="email" value="${raw(user?.email || '')}"></label>
-      <label class="field"><span>Phone (E.164)</span><input id="fPhone" value="${raw(user?.phone || '')}" placeholder="+15551234567"></label>
+      <label class="field"><span>Emoji</span><input id="fAvatar" maxlength="8" value="${user?.avatar || '🤡'}"></label>
+      <label class="field"><span>Venmo</span><input id="fVenmo" value="${user?.venmo || ''}" placeholder="@dave-smith"></label>
+      <label class="field"><span>Email</span><input id="fEmail" type="email" value="${user?.email || ''}"></label>
+      <label class="field"><span>Phone (E.164)</span><input id="fPhone" value="${user?.phone || ''}" placeholder="+15551234567"></label>
     </div>
     <label class="field"><span>${raw(isNew ? 'Password' : 'New password (blank = unchanged)')}</span>
       <input id="fPassword" type="text" placeholder="at least 8 characters"></label>
