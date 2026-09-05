@@ -25,9 +25,40 @@ function line(char = '─') {
   line();
 
   if (!odds.hasApiKey()) {
-    console.error('\n❌ No API key found.');
-    console.error('   Set ODDS_API_KEY in your .env file, or add it in the app under');
-    console.error('   Commissioner → Odds API.\n');
+    // Say precisely what's wrong — "no key found" has three different causes
+    // and three different fixes.
+    const fs = require('fs');
+    const path = require('path');
+    const envPath = path.join(__dirname, '..', '.env');
+    const exists = fs.existsSync(envPath);
+    const body = exists ? fs.readFileSync(envPath, 'utf8') : '';
+    const line = body.split(/\r?\n/).find((l) => l.trim().startsWith('ODDS_API_KEY'));
+    const value = line ? line.slice(line.indexOf('=') + 1).trim() : '';
+
+    console.error('\n❌ No Odds API key found.\n');
+
+    if (!exists) {
+      console.error('   There is no .env file yet. Create one and add your key:\n');
+      console.error('     cp .env.example .env');
+      console.error('     open -e .env          # or: nano .env\n');
+      console.error('   Then set this line (no quotes, no spaces around the =):\n');
+      console.error('     ODDS_API_KEY=your_key_from_the-odds-api.com\n');
+    } else if (!line) {
+      console.error(`   Found ${envPath}, but it has no ODDS_API_KEY line.`);
+      console.error('   Add this to it:\n');
+      console.error('     ODDS_API_KEY=your_key_from_the-odds-api.com\n');
+    } else if (!value) {
+      console.error(`   Found ${envPath} with an empty ODDS_API_KEY.`);
+      console.error('   Fill it in — the line should read:\n');
+      console.error('     ODDS_API_KEY=your_key_from_the-odds-api.com\n');
+      console.error('   (no quotes, and no space on either side of the =)\n');
+    } else {
+      console.error('   A key is set in .env but did not load. Check for stray quotes,');
+      console.error('   spaces around the =, or a leading "export ".\n');
+    }
+
+    console.error('   Get a key at https://the-odds-api.com — the free tier is instant.');
+    console.error('   You can also paste it into the running app under Commissioner → Odds API.\n');
     process.exit(1);
   }
   console.log('✓ API key present');

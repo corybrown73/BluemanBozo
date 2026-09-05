@@ -15,6 +15,11 @@ const PORT = parseInt(process.env.PORT, 10) || 3000;
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
+// Every query param this app reads is a flat scalar (?force=1, ?markets=a,b).
+// The 'simple' parser uses Node's built-in querystring and skips qs entirely,
+// so the nested-object parsing surface is never reachable.
+app.set('query parser', 'simple');
+
 app.use(express.json({ limit: '256kb' }));
 app.use(express.urlencoded({ extended: false, limit: '256kb' }));
 
