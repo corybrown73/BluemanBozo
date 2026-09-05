@@ -798,7 +798,9 @@ function propBoard() {
                           <b>${p.player}</b>
                           <small>${p.selection}${raw(p.line !== null && p.line !== undefined ? ' ' + esc(p.line) : '')} · ${raw(
                             p.game_label ? `${esc(p.game_label)} · ` : ''
-                          )}${p.bookmaker}${raw(p.book_count > 1 ? ` +${esc(p.book_count - 1)} more` : '')}</small>
+                          )}best at ${p.bookmaker}${raw(
+                            p.line_varies ? ` · books range ${esc(p.line_min)}–${esc(p.line_max)}` : ''
+                          )}${raw(p.book_count > 1 ? ` · ${esc(p.book_count)} books` : '')}</small>
                         </div>
                         <div class="pline">${raw(p.line !== null && p.line !== undefined ? esc(p.line) : '—')}</div>
                         <div class="pprice">${oddsStr(p.price)}</div>

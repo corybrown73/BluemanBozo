@@ -346,7 +346,19 @@ async function getEventProps(eventId, { markets, force = false } = {}) {
   }
 }
 
-/** Flatten the bookmaker/market/outcome tree into pickable rows, best price wins. */
+/**
+ * Flatten the bookmaker/market/outcome tree into pickable rows.
+ *
+ * Books disagree slightly on where to set a number: for one Patriots-Seahawks
+ * game, five books posted Drake Maye passing yards at 224.5, 227.5 and 232.5.
+ * Keyed naively that is three separate rows for what is really one bet, and a
+ * five-book slate balloons to 155 rows for a single game.
+ *
+ * So each player+market+side collapses to ONE row at the consensus line — the
+ * line the most books agree on, median as the tiebreak — priced at the best
+ * number available AT that line. The full spread is kept on the row so you can
+ * still see that the market ranges 224.5 to 232.5.
+ */
 function normalizeProps(raw) {
   const game = {
     id: raw.id,
@@ -354,46 +366,87 @@ function normalizeProps(raw) {
     away_team: raw.away_team,
     commence_time: raw.commence_time,
   };
-  const byKey = new Map();
+
+  // Collect every book's quote, grouped by the bet itself (line excluded).
+  const bets = new Map();
 
   for (const book of raw.bookmakers || []) {
     for (const market of book.markets || []) {
       const meta = marketMeta(market.key);
       for (const outcome of market.outcomes || []) {
-        // For player props the player name lives in `description`; `name` is the side.
+        // For player props the player is in `description`; `name` is the side.
         const player = outcome.description || outcome.name;
         const side = outcome.description ? outcome.name : 'Yes';
         if (!player) continue;
-        const line = outcome.point === undefined ? null : outcome.point;
-        const key = `${market.key}|${player}|${side}|${line}`;
-        const existing = byKey.get(key);
-        const row = {
-          market: market.key,
-          market_label: meta.label,
-          market_group: meta.group,
-          market_type: meta.type,
-          unit: meta.unit,
-          player,
-          selection: side,
-          line,
-          price: outcome.price,
-          bookmaker: book.title || book.key,
-          book_count: 1,
-        };
-        if (!existing) {
-          byKey.set(key, row);
-        } else {
-          existing.book_count += 1;
-          if (outcome.price > existing.price) {
-            existing.price = outcome.price;
-            existing.bookmaker = row.bookmaker;
-          }
+
+        const key = `${market.key}|${player}|${side}`;
+        if (!bets.has(key)) {
+          bets.set(key, {
+            market: market.key,
+            market_label: meta.label,
+            market_group: meta.group,
+            market_type: meta.type,
+            unit: meta.unit,
+            player,
+            selection: side,
+            quotes: [],
+          });
         }
+        bets.get(key).quotes.push({
+          line: outcome.point === undefined ? null : outcome.point,
+          price: outcome.price,
+          book: book.title || book.key,
+        });
       }
     }
   }
 
-  const props = [...byKey.values()].sort(
+  const props = [];
+  for (const bet of bets.values()) {
+    const { quotes, ...rest } = bet;
+
+    // The consensus line: whichever number the most books posted.
+    const byLine = new Map();
+    for (const q of quotes) {
+      const k = String(q.line);
+      if (!byLine.has(k)) byLine.set(k, []);
+      byLine.get(k).push(q);
+    }
+    // Most books wins. When nothing is agreed — five books, five different
+    // numbers — take the MEDIAN, not the lowest: picking the low line every
+    // time would quietly make every Over look easy and every Under look hard.
+    const sortedLines = [...byLine.keys()].sort((a, b) => Number(a) - Number(b));
+    const median = sortedLines[Math.floor((sortedLines.length - 1) / 2)];
+    const ranked = [...byLine.entries()].sort((a, b) => {
+      if (b[1].length !== a[1].length) return b[1].length - a[1].length;
+      if (a[0] === median) return -1;
+      if (b[0] === median) return 1;
+      return Number(a[0]) - Number(b[0]);
+    });
+    const [consensusKey, atLine] = ranked[0];
+    const line = consensusKey === 'null' ? null : Number(consensusKey);
+
+    // Best price available at that consensus line.
+    const best = atLine.reduce((a, b) => (b.price > a.price ? b : a));
+
+    const numericLines = quotes.map((q) => q.line).filter((l) => l !== null && Number.isFinite(Number(l))).map(Number);
+    const lineMin = numericLines.length ? Math.min(...numericLines) : null;
+    const lineMax = numericLines.length ? Math.max(...numericLines) : null;
+
+    props.push({
+      ...rest,
+      line,
+      price: best.price,
+      bookmaker: best.book,
+      book_count: quotes.length,
+      books_at_line: atLine.length,
+      line_min: lineMin,
+      line_max: lineMax,
+      line_varies: lineMin !== null && lineMax !== null && lineMin !== lineMax,
+    });
+  }
+
+  props.sort(
     (a, b) =>
       a.market_group.localeCompare(b.market_group) ||
       a.market_label.localeCompare(b.market_label) ||

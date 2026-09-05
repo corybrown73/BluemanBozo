@@ -261,3 +261,104 @@ test('free-tier defaults keep a full slate affordable', () => {
   const fullSlate = markets.length * 16;
   assert.ok(fullSlate * 4 < 500, `four weekly slate loads (${fullSlate * 4}) must fit in the free 500`);
 });
+
+test('books posting different lines collapse to one consensus row', () => {
+  const odds = require('../server/odds');
+  // Shape taken from a real Patriots @ Seahawks response: five books, three
+  // different passing-yard lines for the same quarterback.
+  const raw = {
+    id: 'g1', home_team: 'Seattle Seahawks', away_team: 'New England Patriots',
+    bookmakers: [
+      { key: 'dk', title: 'DraftKings', markets: [{ key: 'player_pass_yds', outcomes: [
+        { name: 'Over', description: 'Drake Maye', price: -113, point: 227.5 },
+        { name: 'Under', description: 'Drake Maye', price: -111, point: 227.5 }] }] },
+      { key: 'fd', title: 'FanDuel', markets: [{ key: 'player_pass_yds', outcomes: [
+        { name: 'Over', description: 'Drake Maye', price: -114, point: 232.5 },
+        { name: 'Under', description: 'Drake Maye', price: -114, point: 232.5 }] }] },
+      { key: 'br', title: 'BetRivers', markets: [{ key: 'player_pass_yds', outcomes: [
+        { name: 'Over', description: 'Drake Maye', price: -115, point: 224.5 },
+        { name: 'Under', description: 'Drake Maye', price: -115, point: 224.5 }] }] },
+      { key: 'eb', title: 'ESPN BET', markets: [{ key: 'player_pass_yds', outcomes: [
+        { name: 'Over', description: 'Drake Maye', price: -108, point: 227.5 },
+        { name: 'Under', description: 'Drake Maye', price: -112, point: 227.5 }] }] },
+    ],
+  };
+
+  const { props } = odds.normalizeProps(raw);
+  assert.strictEqual(props.length, 2, 'eight raw outcomes become one Over and one Under');
+
+  const over = props.find((p) => p.selection === 'Over');
+  assert.strictEqual(over.line, 227.5, 'the line two of four books agree on wins');
+  assert.strictEqual(over.price, -108, 'best price available AT the consensus line');
+  assert.strictEqual(over.bookmaker, 'ESPN BET');
+  assert.strictEqual(over.books_at_line, 2);
+  assert.strictEqual(over.book_count, 4);
+  assert.strictEqual(over.line_varies, true);
+  assert.strictEqual(over.line_min, 224.5);
+  assert.strictEqual(over.line_max, 232.5);
+});
+
+test('a single agreed line is not reported as varying', () => {
+  const odds = require('../server/odds');
+  const raw = { id: 'g2', bookmakers: [
+    { key: 'dk', title: 'DraftKings', markets: [{ key: 'player_receptions', outcomes: [
+      { name: 'Over', description: 'Travis Kelce', price: -135, point: 5.5 }] }] },
+    { key: 'fd', title: 'FanDuel', markets: [{ key: 'player_receptions', outcomes: [
+      { name: 'Over', description: 'Travis Kelce', price: -125, point: 5.5 }] }] },
+  ] };
+  const { props } = odds.normalizeProps(raw);
+  assert.strictEqual(props.length, 1);
+  assert.strictEqual(props[0].line_varies, false);
+  assert.strictEqual(props[0].price, -125, 'better of the two prices');
+});
+
+test('anytime-TD props have no line and still collapse per player', () => {
+  const odds = require('../server/odds');
+  const raw = { id: 'g3', bookmakers: [
+    { key: 'dk', title: 'DraftKings', markets: [{ key: 'player_anytime_td', outcomes: [
+      { name: 'Yes', description: 'Rashee Rice', price: 135 }] }] },
+    { key: 'fd', title: 'FanDuel', markets: [{ key: 'player_anytime_td', outcomes: [
+      { name: 'Yes', description: 'Rashee Rice', price: 150 }] }] },
+  ] };
+  const { props } = odds.normalizeProps(raw);
+  assert.strictEqual(props.length, 1);
+  assert.strictEqual(props[0].line, null);
+  assert.strictEqual(props[0].price, 150, 'longest price wins on a yes/no bet');
+  assert.strictEqual(props[0].line_varies, false);
+});
+
+test('with no agreement between books the median line wins, not the lowest', () => {
+  const odds = require('../server/odds');
+  // Five books, five different numbers — the classic no-consensus case.
+  const lines = [223, 225.5, 228, 230.5, 233];
+  const raw = {
+    id: 'g4',
+    bookmakers: lines.map((point, i) => ({
+      key: `b${i}`, title: `Book ${i}`,
+      markets: [{ key: 'player_pass_yds', outcomes: [
+        { name: 'Over', description: 'Drake Maye', price: -110, point },
+        { name: 'Under', description: 'Drake Maye', price: -110, point },
+      ] }],
+    })),
+  };
+  const { props } = odds.normalizeProps(raw);
+  const over = props.find((p) => p.selection === 'Over');
+  assert.strictEqual(over.line, 228, 'median of 223/225.5/228/230.5/233');
+  assert.notStrictEqual(over.line, 223, 'must not default to the lowest line');
+
+  // The Under must land on the same number, or the two sides disagree.
+  const under = props.find((p) => p.selection === 'Under');
+  assert.strictEqual(under.line, over.line, 'both sides quote the same consensus line');
+});
+
+test('an agreed line still beats the median', () => {
+  const odds = require('../server/odds');
+  const raw = { id: 'g5', bookmakers: [
+    { key: 'a', title: 'A', markets: [{ key: 'player_pass_yds', outcomes: [{ name: 'Over', description: 'QB', price: -110, point: 220 }] }] },
+    { key: 'b', title: 'B', markets: [{ key: 'player_pass_yds', outcomes: [{ name: 'Over', description: 'QB', price: -110, point: 220 }] }] },
+    { key: 'c', title: 'C', markets: [{ key: 'player_pass_yds', outcomes: [{ name: 'Over', description: 'QB', price: -110, point: 235 }] }] },
+  ] };
+  const { props } = odds.normalizeProps(raw);
+  assert.strictEqual(props[0].line, 220, 'two books at 220 outrank the median of 220/220/235');
+  assert.strictEqual(props[0].books_at_line, 2);
+});

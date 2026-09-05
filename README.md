@@ -104,6 +104,16 @@ Either way, **every response is cached for 6 hours and shared by the whole
 group.** Five people browsing after one person loads the slate is still 80
 credits, not 400. Games already cached cost nothing, so a repeat click is free.
 
+### One row per bet, at the consensus line
+
+Books disagree on where to set a number — a single Patriots–Seahawks game came
+back with five books quoting Drake Maye's passing yards at 224.5, 227.5 and
+232.5, which is 155 raw rows for one game. The board collapses each
+player+market+side to **one row at the line the most books agree on** (the median
+when nothing is agreed, so Overs aren't quietly favoured), priced at the **best
+number available at that line**. The row still shows the full spread, so you can
+see the market ranges 224.5–232.5. In practice this cuts the board by about 80%.
+
 ### The app knows your real plan
 
 Every API response carries your remaining and used credits, so the app infers
