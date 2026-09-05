@@ -26,6 +26,23 @@ function html(strings, ...vals) {
 const raw = (value) => ({ __raw: true, value });
 
 const $ = (sel, root = document) => root.querySelector(sel);
+
+/**
+ * Re-focus an input after a re-render, restoring the caret where the element
+ * allows it. number/range/email inputs throw on setSelectionRange, so that part
+ * is best-effort.
+ */
+function restoreCaret(selector, pos) {
+  const el = $(selector);
+  if (!el) return;
+  el.focus();
+  if (pos === null || pos === undefined) return;
+  try {
+    el.setSelectionRange(pos, pos);
+  } catch {
+    /* input type doesn't support a caret — focus alone is enough */
+  }
+}
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 const money = (cents) => '$' + ((Number(cents) || 0) / 100).toFixed(2);
@@ -157,6 +174,9 @@ const S = {
   propsLoading: false,
   propFilter: '',
   selectedProp: null,
+  curve: null,        // alternate-line ladder for the selected prop
+  curveIndex: null,   // which rung of the ladder is chosen
+  priceOverride: '',  // real price typed off the picker's own book
   propSource: 'game',   // 'game' = one matchup | 'slate' = every game at once
   manualMarket: null,   // market chosen in the by-hand form
   slateEstimate: null,
@@ -165,6 +185,7 @@ const S = {
   leaderboard: null,
   historyRows: null,
   adminData: null,
+  schedule: null,
 };
 
 async function loadState() {
@@ -813,16 +834,7 @@ function propBoard() {
             .join('')
         : '<div class="empty"><p class="muted">Nothing matches that filter.</p></div>'
     )}
-    ${raw(
-      S.selectedProp !== null && S.props.props[S.selectedProp]
-        ? html`<hr class="sep">
-          <label class="field"><span>Trash talk (optional, shown on the board)</span>
-            <input id="trashTalk" maxlength="280" placeholder="Free money. Book it."></label>
-          <button class="btn primary block" id="submitProp">
-            Lock in ${describeProp(S.props.props[S.selectedProp])}
-          </button>`
-        : ''
-    )}
+    ${raw(S.selectedProp !== null && S.props.props[S.selectedProp] ? confirmPanel() : '')}
   </div>`;
 }
 
@@ -843,6 +855,83 @@ function marketChips() {
     )}
     ${raw(active ? '<button class="tab" data-chip="" style="font-size:12px;padding:6px 12px">✕ Clear</button>' : '')}
   </div>`;
+}
+
+/** Where the chosen prop gets fine-tuned before it's locked in. */
+function confirmPanel() {
+  const p = S.props.props[S.selectedProp];
+  const rung = S.curve && S.curveIndex !== null ? S.curve.ladder[S.curveIndex] : null;
+  const line = rung ? rung.line : p.line;
+  const modelPrice = rung ? rung.price : p.price;
+  const override = S.priceOverride.trim();
+  const finalPrice = override !== '' && Number.isFinite(Number(override)) ? Number(override) : modelPrice;
+  const slid = rung ? !rung.is_posted : false;
+
+  return html`<hr class="sep">
+    <div class="card tight" style="margin:0 0 12px;border-color:rgba(59,130,246,.5)">
+      <div class="row" style="margin-bottom:${raw(S.curve ? '12px' : '0')}">
+        <span style="font-size:22px">🎯</span>
+        <div style="flex:1;min-width:0">
+          <b>${p.player}</b>
+          <div class="tiny muted">${p.market_label} · ${p.selection}${raw(
+            p.game_label ? ` · ${esc(p.game_label)}` : ''
+          )}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="mono" style="font-size:22px;font-weight:900">${raw(
+            finalPrice === null ? '—' : oddsStr(finalPrice)
+          )}</div>
+          <div class="tiny faint">${raw(
+            override !== '' ? 'your book' : slid ? 'estimated' : 'off the board'
+          )}</div>
+        </div>
+      </div>
+
+      ${raw(
+        S.curve
+          ? html`
+            <div class="row" style="justify-content:space-between;margin-bottom:2px">
+              <span class="eyebrow">Move the line</span>
+              <span class="mono" style="font-size:17px;font-weight:900">${line}${raw(
+                S.curve.unit ? ` <span class="faint tiny">${esc(S.curve.unit)}</span>` : ''
+              )}</span>
+            </div>
+            <input type="range" id="lineSlider" min="0" max="${raw(S.curve.ladder.length - 1)}"
+                   step="1" value="${raw(S.curveIndex)}" style="width:100%;padding:0">
+            <div class="row tiny faint" style="justify-content:space-between;margin-top:2px">
+              <span>${raw(S.curve.ladder[0].line)}</span>
+              <span>${raw(slid ? `posted line ${esc(S.curve.posted_line)}` : 'posted line')}</span>
+              <span>${raw(S.curve.ladder[S.curve.ladder.length - 1].line)}</span>
+            </div>
+            ${raw(
+              slid
+                ? html`<p class="tiny" style="color:#fbcb70;margin:10px 0 0">
+                    ⚠️ ${oddsStr(modelPrice)} is our estimate for ${line}, not a quote.
+                    Check it on your book and paste the real number below.
+                  </p>`
+                : ''
+            )}
+            <div class="row" style="margin-top:10px">
+              <label class="tiny faint" style="flex:1;min-width:150px">
+                Real price from your book (optional)
+                <input id="priceOverride" type="number" step="5" placeholder="${raw(
+                  modelPrice === null ? '-110' : esc(modelPrice)
+                )}" value="${S.priceOverride}" style="margin-top:4px">
+              </label>
+            </div>`
+          : ''
+      )}
+    </div>
+
+    <label class="field"><span>Trash talk (optional, shown on the board)</span>
+      <input id="trashTalk" maxlength="280" placeholder="Free money. Book it."></label>
+    <button class="btn primary block" id="submitProp" ${raw(finalPrice === null ? 'disabled' : '')}>
+      ${raw(
+        finalPrice === null
+          ? 'Set a price to lock this in'
+          : `Lock in ${esc(p.player)} ${esc(p.selection)}${line !== null ? ' ' + esc(line) : ''} (${esc(oddsStr(finalPrice))})`
+      )}
+    </button>`;
 }
 
 function describeProp(p) {
@@ -947,6 +1036,43 @@ function checkLine(meta, value) {
   if (n < min) return `⚠️ ${n} is low for ${meta.label} — real lines start near ${min}. Typo?`;
   if (n > max) return `⚠️ ${n} is high for ${meta.label} — real lines top out near ${max}. Typo?`;
   return null;
+}
+
+/**
+ * Fetch the alternate-line ladder for the selected prop. The opposite side's
+ * price is on the board already and makes the de-vig far more accurate, so
+ * find it and send it along.
+ */
+async function loadCurve() {
+  const p = S.props?.props?.[S.selectedProp];
+  if (!p || p.line === null || p.line === undefined) return;
+
+  const other = S.props.props.find(
+    (q) =>
+      q.market === p.market &&
+      q.player === p.player &&
+      q.line === p.line &&
+      q.selection !== p.selection &&
+      (q.event_id || null) === (p.event_id || null)
+  );
+
+  const params = new URLSearchParams({
+    market: p.market,
+    line: String(p.line),
+    selection: p.selection,
+    price: String(p.price),
+  });
+  if (other) params.set('opposite_price', String(other.price));
+
+  try {
+    const curve = await api('/api/odds/curve?' + params.toString());
+    S.curve = curve;
+    const postedAt = curve.ladder.findIndex((r) => r.is_posted);
+    S.curveIndex = postedAt === -1 ? Math.floor(curve.ladder.length / 2) : postedAt;
+    render();
+  } catch {
+    S.curve = null; // markets without a line just skip the slider
+  }
 }
 
 async function loadSlateEstimate() {
@@ -1054,11 +1180,7 @@ function wirePick() {
       S.propFilter = filter.value;
       const pos = filter.selectionStart;
       render();
-      const again = $('#propFilter');
-      if (again) {
-        again.focus();
-        again.setSelectionRange(pos, pos);
-      }
+      restoreCaret('#propFilter', pos);
     });
   }
 
@@ -1073,9 +1195,35 @@ function wirePick() {
   $$('[data-prop]').forEach((btn) =>
     btn.addEventListener('click', () => {
       S.selectedProp = Number(btn.dataset.prop);
+      S.curve = null;
+      S.curveIndex = null;
+      S.priceOverride = '';
       render();
+      loadCurve();
     })
   );
+
+  const slider = $('#lineSlider');
+  if (slider) {
+    slider.addEventListener('input', () => {
+      S.curveIndex = Number(slider.value);
+      S.priceOverride = '';
+      render();
+      $('#lineSlider')?.focus();
+    });
+  }
+
+  const override = $('#priceOverride');
+  if (override) {
+    override.addEventListener('input', () => {
+      S.priceOverride = override.value;
+      // selectionStart is null on number inputs; restoreCaret copes.
+      let pos = null;
+      try { pos = override.selectionStart; } catch { pos = null; }
+      render();
+      restoreCaret('#priceOverride', pos);
+    });
+  }
 
   const submitProp = $('#submitProp');
   if (submitProp) {
@@ -1083,6 +1231,13 @@ function wirePick() {
       const p = S.props.props[S.selectedProp];
       // In slate mode there is no selectedEvent — the game rides on the prop.
       const game = S.selectedEvent || p;
+      const rung = S.curve && S.curveIndex !== null ? S.curve.ladder[S.curveIndex] : null;
+      const slid = rung ? !rung.is_posted : false;
+      const override = S.priceOverride.trim();
+      const typed = override !== '' && Number.isFinite(Number(override));
+      const price = typed ? Number(override) : rung ? rung.price : p.price;
+      if (price === null) return toast('That line has no price — slide back or type one in.', 'err');
+
       submitPick({
         event_id: game.event_id || game.id,
         home_team: game.home_team,
@@ -1092,9 +1247,10 @@ function wirePick() {
         market: p.market,
         market_label: p.market_label,
         selection: p.selection,
-        line: p.line,
-        price: p.price,
-        bookmaker: p.bookmaker,
+        line: rung ? rung.line : p.line,
+        price,
+        bookmaker: typed ? 'your book' : slid ? 'estimated' : p.bookmaker,
+        line_source: typed ? 'manual' : slid ? 'adjusted' : 'book',
         trash_talk: $('#trashTalk')?.value || '',
       });
     });
@@ -1133,6 +1289,7 @@ function wirePick() {
         line: lineRaw === '' ? null : Number(lineRaw),
         price: Number($('#mPrice').value),
         bookmaker: $('#mBook').value.trim(),
+        line_source: 'manual',
         trash_talk: $('#mTrash').value,
       });
     });
@@ -1674,6 +1831,8 @@ function viewAdmin() {
       <button class="btn primary" id="saveGroup">Save group settings</button>
     </div>
 
+    ${raw(schedulePanel())}
+
     <div class="card">
       <div class="card-head"><h2>📬 Notifications</h2></div>
       <p class="tiny muted">Email: <b>${raw(S.channels.email.configured ? 'ready' : 'not configured')}</b> ·
@@ -1686,6 +1845,109 @@ function viewAdmin() {
       </div>
     </div>
   `;
+}
+
+const CRON_PRESETS = {
+  cron_open:  [['0 9 * * 2','Tue 9am'],['0 10 * * 2','Tue 10am'],['0 9 * * 1','Mon 9am'],['0 18 * * 2','Tue 6pm']],
+  cron_mid:   [['0 9 * * 4','Thu 9am'],['0 12 * * 4','Thu noon'],['0 9 * * 3','Wed 9am'],['0 18 * * 4','Thu 6pm']],
+  cron_final: [['0 20 * * 6','Sat 8pm'],['0 18 * * 6','Sat 6pm'],['0 9 * * 0','Sun 9am'],['0 22 * * 6','Sat 10pm']],
+};
+
+function schedulePanel() {
+  const sc = S.schedule;
+  if (!sc) return html`<div class="card"><div class="card-head"><h2>🗓️ Weekly schedule</h2></div><div class="spinner"></div></div>`;
+
+  const costNote = {
+    open: '0 credits',
+    mid: sc.mid_refresh_lines ? '~25 credits (re-prices picked games)' : '0 credits (injuries are free)',
+    final: '~25 credits (re-prices picked games)',
+  };
+
+  return html`<div class="card">
+    <div class="card-head">
+      <h2>🗓️ Weekly schedule</h2>
+      <span class="badge ${sc.enabled ? 'win' : ''}">${raw(sc.enabled ? 'running' : 'off')}</span>
+      <div class="spacer"></div>
+      <span class="tiny faint">${sc.timezone}</span>
+    </div>
+
+    <div class="checkline">
+      <input type="checkbox" id="schedOn" ${raw(sc.enabled ? 'checked' : '')}>
+      <label for="schedOn"><b>Send the weekly digests automatically</b></label>
+    </div>
+    <p class="tiny faint" style="margin-top:-4px">
+      Runs inside the app, so it needs the site to stay up. A missed slot (restart, sleeping host)
+      is caught up automatically within 15 minutes.
+    </p>
+
+    ${raw(
+      sc.jobs
+        .map(
+          (j) => html`<div class="card tight" style="margin:0 0 10px">
+            <div class="row">
+              <div style="flex:1;min-width:190px">
+                <b class="tiny">${j.label}</b>
+                <div class="tiny faint">${raw(costNote[j.key])}${raw(
+                  j.last_run ? ` · last ran ${esc(fmtKickoff(j.last_run))}` : ' · never run'
+                )}${raw(j.ran_this_week ? ' <span class="badge win">done this week</span>' : '')}</div>
+              </div>
+              <select data-cron="${j.setting}" style="width:auto;min-width:130px">
+                ${raw(
+                  (CRON_PRESETS[j.setting] || [])
+                    .map(([expr, label]) => html`<option value="${expr}" ${raw(expr === j.cron ? 'selected' : '')}>${label}</option>`)
+                    .join('')
+                )}
+                ${raw(
+                  (CRON_PRESETS[j.setting] || []).some(([e]) => e === j.cron)
+                    ? ''
+                    : html`<option value="${j.cron}" selected>${j.cron}</option>`
+                )}
+              </select>
+              <button class="btn sm ghost" data-preview="${j.key}">👁 Preview</button>
+              <button class="btn sm" data-runjob="${j.key}">Send now</button>
+            </div>
+          </div>`
+        )
+        .join('')
+    )}
+
+    <div class="grid two" style="margin-top:6px">
+      <label class="field"><span>Timezone</span>
+        <input id="schedTz" value="${sc.timezone}" placeholder="America/New_York"></label>
+      <label class="field"><span>Send via</span>
+        <select id="schedChannels">
+          <option value="email" ${raw(sc.channels.join(',') === 'email' ? 'selected' : '')}>Email</option>
+          <option value="sms" ${raw(sc.channels.join(',') === 'sms' ? 'selected' : '')}>Text</option>
+          <option value="email,sms" ${raw(sc.channels.length === 2 ? 'selected' : '')}>Both</option>
+        </select>
+      </label>
+    </div>
+    <div class="checkline"><input type="checkbox" id="schedAutoOpen" ${raw(sc.auto_open_week ? 'checked' : '')}>
+      <label for="schedAutoOpen">Open the next week automatically on Tuesday</label></div>
+    <div class="checkline"><input type="checkbox" id="schedInjuries" ${raw(sc.injury_feed ? 'checked' : '')}>
+      <label for="schedInjuries">Include injury designations (free — from ESPN, not the Odds API)</label></div>
+    <div class="checkline"><input type="checkbox" id="schedMidLines" ${raw(sc.mid_refresh_lines ? 'checked' : '')}>
+      <label for="schedMidLines">Also re-price lines on Thursday <span class="faint">(+~25 credits/week)</span></label></div>
+
+    <button class="btn primary" id="saveSchedule">Save schedule</button>
+
+    ${raw(
+      sc.recent && sc.recent.length
+        ? html`<hr class="sep"><div class="eyebrow">Recent runs</div>
+          ${raw(
+            sc.recent
+              .slice(0, 6)
+              .map(
+                (r) => html`<div class="row tiny muted" style="justify-content:space-between;padding:3px 0">
+                  <span>${raw(r.late ? '⏰ ' : '')}${r.job} · ${r.status}</span>
+                  <span class="faint">${raw(esc(r.detail || ''))} ${raw(r.credits ? `· ${esc(r.credits)}cr` : '')}</span>
+                </div>`
+              )
+              .join('')
+          )}`
+        : ''
+    )}
+  </div>`;
 }
 
 function gradePanel() {
@@ -1729,11 +1991,13 @@ function toLocalInput(iso) {
 
 async function loadAdmin() {
   try {
-    const [settingsRes, usersRes, usageRes] = await Promise.all([
+    const [settingsRes, usersRes, usageRes, schedRes] = await Promise.all([
       api('/api/admin/settings'),
       api('/api/admin/users'),
       api('/api/admin/usage'),
+      api('/api/admin/schedule'),
     ]);
+    S.schedule = schedRes;
     S.marketCatalog = settingsRes.available_markets;
     S.adminData = {
       settings: settingsRes.settings,
@@ -1890,6 +2154,67 @@ function wireAdmin() {
       }
     });
   }
+
+  const saveSchedule = $('#saveSchedule');
+  if (saveSchedule) {
+    saveSchedule.addEventListener('click', async () => {
+      const body = {
+        schedule_enabled: $('#schedOn').checked ? '1' : '0',
+        schedule_timezone: $('#schedTz').value.trim(),
+        schedule_channels: $('#schedChannels').value,
+        auto_open_week: $('#schedAutoOpen').checked ? '1' : '0',
+        injury_feed: $('#schedInjuries').checked ? '1' : '0',
+        mid_refresh_lines: $('#schedMidLines').checked ? '1' : '0',
+      };
+      $$('[data-cron]').forEach((sel) => { body[sel.dataset.cron] = sel.value; });
+      try {
+        const res = await api('/api/admin/schedule', { method: 'PATCH', body });
+        S.schedule = res.status;
+        toast(res.status.enabled ? 'Schedule saved and armed.' : 'Schedule saved (currently off).', 'ok');
+        render();
+      } catch (err) {
+        toast(err.message, 'err', 7000);
+      }
+    });
+  }
+
+  $$('[data-preview]').forEach((btn) =>
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        const res = await api(`/api/admin/schedule/preview/${btn.dataset.preview}`, { method: 'POST' });
+        modal(html`
+          <div class="card-head"><h2 style="font-size:16px">${res.subject}</h2>
+            <div class="spacer"></div>
+            <span class="badge">${res.credits} credits</span></div>
+          <pre style="white-space:pre-wrap;font-family:var(--mono);font-size:12.5px;line-height:1.55;background:#0a1024;border:1px solid var(--line);border-radius:9px;padding:14px;overflow-x:auto">${res.text}</pre>
+        `);
+      } catch (err) {
+        toast(err.message, 'err', 7000);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '👁 Preview';
+      }
+    })
+  );
+
+  $$('[data-runjob]').forEach((btn) =>
+    btn.addEventListener('click', async () => {
+      if (!confirm('Send this digest to the group right now?')) return;
+      btn.disabled = true;
+      try {
+        const res = await api(`/api/admin/schedule/run/${btn.dataset.runjob}`, { method: 'POST' });
+        toast(`Sent to ${res.delivered} member(s). ${res.credits} credits used.`, res.delivered ? 'ok' : 'err', 6000);
+        S.adminData = null;
+        render();
+      } catch (err) {
+        toast(err.message, 'err', 7000);
+      } finally {
+        btn.disabled = false;
+      }
+    })
+  );
 
   const addMember = $('#addMember');
   if (addMember) addMember.addEventListener('click', () => memberModal(null));

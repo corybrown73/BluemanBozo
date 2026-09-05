@@ -202,6 +202,7 @@ router.post('/weeks/:id/picks', (req, res) => {
     line,
     price,
     bookmaker: body.bookmaker || null,
+    line_source: ['book', 'adjusted', 'manual'].includes(body.line_source) ? body.line_source : 'book',
     trash_talk: body.trash_talk ? String(body.trash_talk).slice(0, 280) : null,
   };
 
@@ -209,15 +210,15 @@ router.post('/weeks/:id/picks', (req, res) => {
     db.prepare(
       `UPDATE picks SET event_id=@event_id, home_team=@home_team, away_team=@away_team, commence_time=@commence_time,
         player=@player, market=@market, market_label=@market_label, selection=@selection, line=@line, price=@price,
-        bookmaker=@bookmaker, trash_talk=@trash_talk, updated_at=datetime('now')
+        bookmaker=@bookmaker, line_source=@line_source, trash_talk=@trash_talk, updated_at=datetime('now')
        WHERE id=@id`
     ).run({ ...payload, id: replacing.id });
   } else {
     db.prepare(
       `INSERT INTO picks (week_id, user_id, event_id, home_team, away_team, commence_time, player, market,
-        market_label, selection, line, price, bookmaker, trash_talk)
+        market_label, selection, line, price, bookmaker, line_source, trash_talk)
        VALUES (@week_id, @user_id, @event_id, @home_team, @away_team, @commence_time, @player, @market,
-        @market_label, @selection, @line, @price, @bookmaker, @trash_talk)`
+        @market_label, @selection, @line, @price, @bookmaker, @line_source, @trash_talk)`
     ).run(payload);
   }
 

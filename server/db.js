@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS picks (
   line           REAL,
   price          INTEGER NOT NULL DEFAULT -110,
   bookmaker      TEXT,
+  -- 'book' = taken straight off the board, 'adjusted' = line slid and priced by
+  -- our model, 'manual' = typed in from whatever book the picker actually uses.
+  line_source    TEXT NOT NULL DEFAULT 'book',
   trash_talk     TEXT,
   result         TEXT NOT NULL DEFAULT 'pending',
   actual_value   REAL,
@@ -122,6 +125,35 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Where each pick's number sat every time we checked. The bozo places the bet
+-- days after everyone picked, so the line they get is not the line that was
+-- chosen; this is what makes the Saturday placement sheet accurate.
+CREATE TABLE IF NOT EXISTS line_snapshots (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  pick_id     INTEGER NOT NULL REFERENCES picks(id) ON DELETE CASCADE,
+  line        REAL,
+  price       INTEGER,
+  bookmaker   TEXT,
+  source      TEXT NOT NULL DEFAULT 'scheduled',
+  captured_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_pick ON line_snapshots(pick_id);
+
+-- Last run of each scheduled digest, so a restart or a sleeping host can catch
+-- up rather than silently skipping a week.
+CREATE TABLE IF NOT EXISTS job_runs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  job         TEXT NOT NULL,
+  week_id     INTEGER REFERENCES weeks(id) ON DELETE SET NULL,
+  status      TEXT NOT NULL,
+  detail      TEXT,
+  credits     INTEGER NOT NULL DEFAULT 0,
+  recipients  INTEGER NOT NULL DEFAULT 0,
+  late        INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs(job, created_at);
+
 CREATE TABLE IF NOT EXISTS api_usage (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   endpoint    TEXT NOT NULL,
@@ -154,6 +186,21 @@ const DEFAULT_SETTINGS = {
   props_cache_minutes: '360',
   events_cache_minutes: '60',
   monthly_credit_cap: '450',
+
+  // Weekly rhythm. Times are in schedule_timezone, cron format: min hour * * dow
+  // (0=Sun ... 2=Tue, 4=Thu, 6=Sat).
+  schedule_enabled: '0',
+  schedule_timezone: 'America/New_York',
+  cron_open:  '0 9 * * 2',    // Tuesday 9am  - open the week, call for picks
+  cron_mid:   '0 9 * * 4',    // Thursday 9am - line moves, injuries, who's missing
+  cron_final: '0 20 * * 6',   // Saturday 8pm - placement sheet for the bozo
+  schedule_channels: 'email',
+  auto_open_week: '1',
+  injury_feed: '1',
+  // Thursday costs nothing by default: injuries come free from ESPN and the
+  // "who hasn't picked" nag needs no API at all. Turn this on only if you have
+  // credits to spare — it re-prices every picked game.
+  mid_refresh_lines: '0',
 };
 
 function getSetting(key, fallback = null) {

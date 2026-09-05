@@ -362,3 +362,88 @@ test('an agreed line still beats the median', () => {
   assert.strictEqual(props[0].line, 220, 'two books at 220 outrank the median of 220/220/235');
   assert.strictEqual(props[0].books_at_line, 2);
 });
+
+/* ---------------- alternate line curve ---------------- */
+
+test('the curve reprices the posted line back to roughly the posted price', () => {
+  const alt = require('../server/altlines');
+  const c = alt.buildCurve({ market: 'player_pass_yds', line: 227.5, selection: 'Over', price: -113, opposite_price: -111 });
+  const back = c.priceAt(227.5);
+  // Within a few cents: the vig is split evenly back, the book's was not exactly even.
+  assert.ok(Math.abs(back.price - -113) < 15, `repriced to ${back.price}, expected near -113`);
+});
+
+test('sliding an Over up makes it longer, down makes it shorter', () => {
+  const alt = require('../server/altlines');
+  const c = alt.buildCurve({ market: 'player_pass_yds', line: 227.5, selection: 'Over', price: -113, opposite_price: -111 });
+  const probs = [200, 220, 240, 260].map((l) => c.priceAt(l).true_probability);
+  for (let i = 1; i < probs.length; i++) {
+    assert.ok(probs[i] < probs[i - 1], 'a higher Over line must be less likely');
+  }
+  assert.ok(c.priceAt(260).price > c.priceAt(200).price, 'longer line pays more');
+});
+
+test('Under mirrors Over at the same line', () => {
+  const alt = require('../server/altlines');
+  const c = alt.buildCurve({ market: 'player_rush_yds', line: 62.5, selection: 'Over', price: -115, opposite_price: -105 });
+  const over = c.priceAt(80, 'Over');
+  const under = c.priceAt(80, 'Under');
+  assert.ok(Math.abs(over.true_probability + under.true_probability - 1) < 1e-9, 'the two sides sum to 1 before vig');
+});
+
+test('the curve declines to quote lines no book would offer', () => {
+  const alt = require('../server/altlines');
+  const c = alt.buildCurve({ market: 'player_receptions', line: 5.5, selection: 'Over', price: -135, opposite_price: 105 });
+
+  const sane = c.priceAt(5.5);
+  assert.ok(sane.price !== null, 'the posted line is quotable');
+
+  const absurd = c.priceAt(20.5);
+  assert.strictEqual(absurd.price, null, 'a 0% line gets no price at all');
+  assert.strictEqual(absurd.unquotable, 'too_unlikely');
+
+  const gimme = c.priceAt(0.5);
+  assert.strictEqual(gimme.price, null, 'a near-certainty gets no price either');
+  assert.strictEqual(gimme.unquotable, 'too_likely');
+});
+
+test('distinct lines never collapse to the same price', () => {
+  const alt = require('../server/altlines');
+  const c = alt.buildCurve({ market: 'player_receptions', line: 5.5, selection: 'Over', price: -135, opposite_price: 105 });
+  const priced = c.ladder ? null : null;
+  const quotes = [3.5, 4.5, 5.5, 6.5, 7.5].map((l) => c.priceAt(l)).filter((q) => q.price !== null);
+  const seen = new Set();
+  for (const q of quotes) {
+    assert.ok(!seen.has(q.price), `price ${q.price} appeared twice — the curve is saturating`);
+    seen.add(q.price);
+  }
+  assert.ok(quotes.length >= 4, 'the usable range is still wide enough to be useful');
+});
+
+test('a yes/no market has no line to slide', () => {
+  const alt = require('../server/altlines');
+  assert.strictEqual(alt.buildCurve({ market: 'player_anytime_td', line: null, selection: 'Yes', price: 135 }), null);
+});
+
+test('the ladder brackets the posted line and marks it', () => {
+  const alt = require('../server/altlines');
+  const c = alt.curveFor({ market: 'player_reception_yds', line: 58.5, selection: 'Over', price: -110, opposite_price: -110 });
+  const posted = c.ladder.filter((r) => r.is_posted);
+  assert.strictEqual(posted.length, 1, 'exactly one rung is the posted line');
+  assert.strictEqual(posted[0].line, 58.5);
+  assert.ok(c.ladder[0].line < 58.5 && c.ladder[c.ladder.length - 1].line > 58.5, 'ladder spans both sides');
+  assert.ok(c.ladder.every((r) => r.estimated === true), 'every rung is flagged as an estimate');
+});
+
+test('spread scales with the line rather than being fixed', () => {
+  const alt = require('../server/altlines');
+  assert.ok(alt.sigmaFor('player_rush_yds', 120) > alt.sigmaFor('player_rush_yds', 40), 'a bigger line scatters more');
+  assert.ok(alt.sigmaFor('player_rush_yds', 2) >= 15, 'tiny lines still get a sane floor');
+});
+
+test('normal helpers round-trip', () => {
+  const alt = require('../server/altlines');
+  for (const p of [0.05, 0.25, 0.5, 0.75, 0.95]) {
+    assert.ok(Math.abs(alt.normalCdf(alt.normalInv(p)) - p) < 1e-4, `round-trip at p=${p}`);
+  }
+});

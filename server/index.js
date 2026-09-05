@@ -85,13 +85,40 @@ app.use((err, req, res, next) => {
 
 function start() {
   const userCount = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+  const sched = require('./scheduler').start();
   const server = app.listen(PORT, () => {
     console.log(`\n  🤡  Blue Man Bozo running on http://localhost:${PORT}`);
     console.log(`      group:   ${getSetting('group_name')}`);
     console.log(`      members: ${userCount}`);
+    console.log(
+      `      digests: ${sched.enabled ? `on (${sched.jobs.length} jobs, ${sched.timezone})` : 'off — enable in Commissioner → Weekly schedule'}`
+    );
     if (userCount === 0) console.log('      ⚠  No members yet — run: npm run seed\n');
     else console.log('');
   });
+  // Hosts send SIGTERM on deploy and hard-kill after a grace period. The cron
+  // tasks hold the event loop open, so without this the process never exits on
+  // its own and every deploy ends in a kill.
+  let closing = false;
+  const shutdown = (signal) => {
+    if (closing) return;
+    closing = true;
+    console.log(`\n  ${signal} received — shutting down.`);
+    require('./scheduler').stop();
+    server.close(() => {
+      try {
+        db.close();
+      } catch {
+        /* already closed */
+      }
+      process.exit(0);
+    });
+    // Don't hang forever on a stuck connection.
+    setTimeout(() => process.exit(0), 8000).unref();
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+
   return server;
 }
 

@@ -6,6 +6,8 @@ const { requireAdmin, hashPassword, publicUserCols } = require('../auth');
 const odds = require('../odds');
 const notify = require('../notify');
 const game = require('../game');
+const scheduler = require('../scheduler');
+const injuries = require('../injuries');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -188,6 +190,88 @@ router.post('/notifications/test', async (req, res) => {
       : await notify.sendEmail({ to: target, subject: '🤡 Blue Man Bozo test', text: body, user_id: req.user.id });
 
   res.status(result.ok ? 200 : 400).json(result);
+});
+
+/* ---------------- weekly schedule ---------------- */
+
+router.get('/schedule', (req, res) => {
+  res.json(scheduler.status());
+});
+
+/** Build a digest without sending it — costs whatever its line refresh costs. */
+router.post('/schedule/preview/:job', async (req, res) => {
+  try {
+    const result = await scheduler.runJob(req.params.job, { dryRun: true });
+    if (!result.ok) return res.status(400).json({ error: result.reason || 'Nothing to preview.' });
+    res.json({
+      subject: result.digest.subject,
+      text: result.digest.text,
+      credits: result.digest.credits || 0,
+      injury_flags: result.digest.injury_flags || [],
+      moves: result.digest.moves || [],
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Fire a job now, for real. */
+router.post('/schedule/run/:job', async (req, res) => {
+  try {
+    const result = await scheduler.runJob(req.params.job);
+    if (!result.ok) return res.status(400).json({ error: result.reason || 'Nothing to send.' });
+    res.json({
+      ok: true,
+      subject: result.digest.subject,
+      delivered: result.delivered,
+      credits: result.digest.credits || 0,
+      results: result.results,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Cron settings live here so the scheduler can be rebuilt on save. */
+router.patch('/schedule', (req, res) => {
+  const allowed = [
+    'schedule_enabled', 'schedule_timezone', 'cron_open', 'cron_mid', 'cron_final',
+    'schedule_channels', 'auto_open_week', 'injury_feed', 'mid_refresh_lines',
+  ];
+  const cron = require('node-cron');
+  const changed = [];
+
+  for (const [key, value] of Object.entries(req.body || {})) {
+    if (!allowed.includes(key)) continue;
+    if (key.startsWith('cron_') && value && !cron.validate(String(value))) {
+      return res.status(400).json({ error: `"${value}" is not a valid cron expression for ${key}.` });
+    }
+    if (key === 'schedule_timezone' && value) {
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: String(value) });
+      } catch {
+        return res.status(400).json({ error: `"${value}" is not a recognized timezone.` });
+      }
+    }
+    setSetting(key, value);
+    changed.push(key);
+  }
+  if (!changed.length) return res.status(400).json({ error: 'No schedule settings in that request.' });
+
+  scheduler.start(); // rebuild with the new settings
+  res.json({ ok: true, changed, status: scheduler.status() });
+});
+
+/** Verify the free ESPN injury feed. */
+router.get('/injuries', async (req, res) => {
+  const result = await injuries.getInjuries({ force: req.query.force === '1' });
+  res.json({
+    count: result.injuries.length,
+    cached: result.cached,
+    stale: result.stale || false,
+    error: result.error || null,
+    sample: result.injuries.slice(0, 8),
+  });
 });
 
 /** Clear cached odds so the next request refetches. Costs credits next call. */

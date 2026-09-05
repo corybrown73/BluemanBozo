@@ -129,6 +129,79 @@ On the 20,000 tier, go to **Commissioner → Odds API** and raise
 optionally drop the cache to 180 minutes for fresher lines. At 10 markets a full
 slate is ~160 credits, which is roughly 110 slate loads a month.
 
+## The weekly rhythm (and the free-plan budget)
+
+Three automatic bulletins, run by a scheduler inside the app:
+
+| When | What goes out | Credits |
+|---|---|---|
+| **Tuesday 9am** | Week opens, everyone nagged for a pick, payer named | **0** |
+| **Thursday 9am** | Injury designations + who still hasn't picked | **0** |
+| **Saturday 8pm** | **Placement sheet** — every leg re-priced at today's numbers | **~25** |
+
+Saturday is the one that matters. Everyone picks Tuesday–Thursday but the bozo
+places the ticket Sunday morning, so the line they get is not the line that was
+chosen. The Saturday sheet lists every leg at its *current* number, flags any leg
+that moved, and names the injuries — so the person placing it isn't working from
+four-day-old prices.
+
+### Why Thursday is free
+
+Injuries come from ESPN's public feed, not the Odds API — no key, no quota. The
+"who hasn't picked" nag needs no API at all. Thursday only costs credits if you
+tick **Also re-price lines on Thursday** (+~25/week). It's off by default.
+
+### The free-plan budget
+
+| Item | Per week | Per month |
+|---|---|---|
+| Tuesday digest | 0 | 0 |
+| Thursday digest | 0 | 0 |
+| Saturday placement sheet | ~25 | ~108 |
+| Browsing (one full-slate load a week, shared by everyone) | 80 | ~346 |
+| **Total** | **~105** | **~454 of 500** ✓ |
+
+If that's tighter than you like: drop to four markets (Commissioner → Odds API)
+and it falls to ~360/month. If you outgrow it, the 20,000 tier makes all of this
+rounding error.
+
+### Turning it on
+
+**Commissioner → Weekly schedule.** Tick *Send the weekly digests
+automatically*, set your timezone, pick the times. Each job has a **Preview**
+(builds it without sending) and a **Send now**.
+
+The scheduler runs in-process, so the site has to stay up — which it does on any
+host with a persistent disk. If a slot is missed (restart, sleeping host) it is
+caught up automatically within 15 minutes rather than skipped.
+
+Verify the injury feed with:
+
+```bash
+npm run check-injuries
+```
+
+It's an undocumented public endpoint, so if it ever breaks the digests simply
+omit the injury section.
+
+## Sliding the line
+
+The board shows the number the books actually posted, but you can move it. Pick a
+player, then drag the slider — **Drake Maye Over 228 → Over 273** — and the price
+re-quotes as you go.
+
+Those alternate prices are **derived, not quoted**. The Odds API sells alternate
+lines as separate markets at another credit per market per game, which would
+roughly double the cost of every board, so instead the app removes the vig from
+the posted Over/Under, fits a distribution to the stat, and reads any other line
+off the same curve. It lands within a few cents of what books post — on a real
+Maye quote it priced Over 250 at +167 against a market of roughly +160 to +180.
+
+Every slid price is labelled **estimated**, and there's a box to paste the real
+number off your own book, which is what actually gets recorded. Lines nobody
+would price (a 2% or 98% shot) are refused outright rather than given an invented
+number.
+
 ## How a week runs
 
 ```

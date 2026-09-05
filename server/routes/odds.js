@@ -2,6 +2,7 @@
 
 const express = require('express');
 const odds = require('../odds');
+const altlines = require('../altlines');
 const { requireAuth, requireAdmin } = require('../auth');
 const { getSetting } = require('../db');
 
@@ -64,6 +65,26 @@ router.get('/slate', async (req, res) => {
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
+});
+
+/**
+ * Price a ladder of alternate lines around a posted prop. Pure maths on numbers
+ * the client already has — costs zero credits and never touches the provider.
+ */
+router.get('/curve', (req, res) => {
+  const anchor = {
+    market: String(req.query.market || ''),
+    line: Number(req.query.line),
+    selection: String(req.query.selection || 'Over'),
+    price: Number(req.query.price),
+    opposite_price: req.query.opposite_price === undefined ? undefined : Number(req.query.opposite_price),
+  };
+  if (!anchor.market || !Number.isFinite(anchor.line) || !Number.isFinite(anchor.price)) {
+    return res.status(400).json({ error: 'Need market, line and price to build a curve.' });
+  }
+  const curve = altlines.curveFor(anchor);
+  if (!curve) return res.status(400).json({ error: 'That market has no line to slide.' });
+  res.json(curve);
 });
 
 router.get('/scores', requireAdmin, async (req, res) => {

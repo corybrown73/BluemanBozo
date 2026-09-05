@@ -71,6 +71,9 @@ test.before(async () => {
 });
 
 test.after(() => {
+  // The schedule tests arm real cron tasks; leaving them running holds the
+  // event loop open and the test runner never exits.
+  require('../server/scheduler').stop();
   server?.close();
   fs.rmSync(TMP, { recursive: true, force: true });
 });
@@ -350,4 +353,82 @@ test('an impossible stat line is flagged at grading', async () => {
   });
   assert.strictEqual(res.status, 200);
   assert.match(res.data.warnings.join(' '), /record/);
+});
+
+/* ---------------- weekly schedule ---------------- */
+
+test('the schedule reports its jobs and starts disabled', async () => {
+  await call('POST', '/api/auth/login', { username: 'boss', password: 'password123' });
+  const res = await call('GET', '/api/admin/schedule');
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.data.enabled, false, 'off until switched on');
+  assert.deepStrictEqual(res.data.jobs.map((j) => j.key), ['open', 'mid', 'final']);
+  assert.ok(res.data.jobs.every((j) => j.valid), 'every default cron expression parses');
+});
+
+test('an invalid cron expression is rejected rather than silently stored', async () => {
+  const res = await call('PATCH', '/api/admin/schedule', { cron_open: 'every tuesday please' });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.data.error, /not a valid cron/);
+});
+
+test('an unrecognized timezone is rejected', async () => {
+  const res = await call('PATCH', '/api/admin/schedule', { schedule_timezone: 'Mars/Olympus_Mons' });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.data.error, /not a recognized timezone/);
+});
+
+test('enabling the schedule arms the jobs', async () => {
+  const res = await call('PATCH', '/api/admin/schedule', {
+    schedule_enabled: '1', schedule_timezone: 'America/New_York', cron_open: '0 9 * * 2',
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.data.status.enabled, true);
+  assert.strictEqual(res.data.status.timezone, 'America/New_York');
+});
+
+test('the Tuesday digest costs nothing and names who is missing', async () => {
+  const res = await call('POST', '/api/admin/schedule/preview/open');
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.data.credits, 0, 'the open digest never spends credits');
+  assert.match(res.data.subject, /is open/);
+  assert.match(res.data.text, /WEEK \d+ IS OPEN/);
+});
+
+test('a preview does not count as having run', async () => {
+  const before = await call('GET', '/api/admin/schedule');
+  await call('POST', '/api/admin/schedule/preview/open');
+  const after = await call('GET', '/api/admin/schedule');
+  assert.strictEqual(
+    after.data.jobs.find((j) => j.key === 'open').last_run,
+    before.data.jobs.find((j) => j.key === 'open').last_run,
+    'previewing must not record a run or suppress the real one'
+  );
+});
+
+test('a non-admin cannot read or fire the schedule', async () => {
+  await call('POST', '/api/auth/login', { username: 'rube', password: 'password123' });
+  assert.strictEqual((await call('GET', '/api/admin/schedule')).status, 403);
+  assert.strictEqual((await call('POST', '/api/admin/schedule/run/final')).status, 403);
+  await call('POST', '/api/auth/login', { username: 'boss', password: 'password123' });
+});
+
+test('the alternate-line curve endpoint prices a slid line', async () => {
+  const res = await call(
+    'GET',
+    '/api/odds/curve?market=player_pass_yds&line=227.5&selection=Over&price=-113&opposite_price=-111'
+  );
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.data.posted_line, 227.5);
+  assert.ok(res.data.ladder.length > 5, 'a usable ladder of alternates');
+  const posted = res.data.ladder.find((r) => r.is_posted);
+  assert.ok(posted, 'the posted line is on the ladder');
+  const longer = res.data.ladder.filter((r) => r.line > 227.5);
+  assert.ok(longer.every((r) => r.true_probability < posted.true_probability), 'higher Over lines are less likely');
+});
+
+test('the curve endpoint refuses a market with no line', async () => {
+  const res = await call('GET', '/api/odds/curve?market=player_anytime_td&line=1&price=135');
+  assert.strictEqual(res.status, 400);
+  assert.match(res.data.error, /no line to slide/);
 });
