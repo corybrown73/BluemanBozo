@@ -415,3 +415,32 @@ input[type="range"]::-moz-range-track { height: 6px; border-radius: 99px; backgr
   .stat-big { font-size: 26px; }
   .acc-pct .mono { font-size: 19px; }
 }
+
+/* ---------------- tab labels ---------------- */
+.tab-short { display: none; }
+@media (max-width: 620px) {
+  .tab-full { display: none; }
+  .tab-short { display: inline; }
+  .tab { padding: 8px 13px; }
+}
+
+/* ---------------- compact pay line ---------------- */
+.payline { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
+.payline-av { font-size: 30px; flex: none; }
+
+/* ---------------- your week ---------------- */
+.myline { display: flex; align-items: center; gap: 12px; border-color: rgba(59, 130, 246, .45); }
+
+/* ---------------- how it works ---------------- */
+.howto { margin: 0; padding-left: 22px; line-height: 1.55; font-size: 14px; }
+.howto li { margin-bottom: 8px; }
+.howto li::marker { color: var(--blue-lit); font-weight: 900; }
+
+/* group card: three across on a phone, just smaller */
+@media (max-width: 620px) {
+  .stat-row { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stat { padding: 10px 10px; }
+  .stat-big { font-size: 21px; }
+  .stat-label { font-size: 9.5px; letter-spacing: .06em; }
+  .stat-sub { font-size: 11px; }
+}

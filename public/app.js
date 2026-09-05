@@ -211,12 +211,12 @@ function userById(id) {
 /* ---------------- tabs / routing ---------------- */
 
 const TABS = [
-  { key: 'week', label: 'This Week' },
-  { key: 'pick', label: 'Make a Pick' },
-  { key: 'vote', label: 'Vote' },
-  { key: 'shame', label: 'Hall of Shame' },
-  { key: 'history', label: 'History' },
-  { key: 'admin', label: 'Commissioner', adminOnly: true },
+  { key: 'week', label: 'This Week', short: 'Week' },
+  { key: 'pick', label: 'Make a Pick', short: 'Pick' },
+  { key: 'vote', label: 'Vote', short: 'Vote' },
+  { key: 'shame', label: 'Hall of Shame', short: 'Shame' },
+  { key: 'history', label: 'History', short: 'History' },
+  { key: 'admin', label: 'Commissioner', short: 'Admin', adminOnly: true },
 ];
 
 function renderTabs() {
@@ -224,7 +224,7 @@ function renderTabs() {
   const needsPick = S.week && S.week.week.status === 'open' && !myPick();
   $('#tabs').innerHTML = TABS.filter((t) => !t.adminOnly || S.user?.is_admin)
     .map(
-      (t) => html`<button class="tab ${t.key === S.tab ? 'active' : ''}" data-tab="${t.key}">${t.label}${raw(
+      (t) => html`<button class="tab ${t.key === S.tab ? 'active' : ''}" data-tab="${t.key}"><span class="tab-full">${t.label}</span><span class="tab-short">${t.short}</span>${raw(
         (t.key === 'vote' && needsVote) || (t.key === 'pick' && needsPick) ? '<span class="dot"></span>' : ''
       )}</button>`
     )
@@ -244,7 +244,45 @@ function currentHashTab() {
 window.addEventListener('hashchange', () => {
   S.tab = currentHashTab();
   render();
+  // A deliberate tab switch always refetches — it's one cheap local call, and
+  // the throttle below exists for focus/visibility bursts, not for this.
+  refreshQuietly({ force: true });
 });
+
+/**
+ * The commissioner locks, grades and crowns from their phone while everyone
+ * else has the site open in a background tab. Without this, those tabs keep
+ * saying "picks open" until someone hard-reloads — and nobody hard-reloads.
+ * A refetch is one small local call, so do it on every tab switch and every
+ * time the page comes back into view, throttled so a fidgety user isn't a
+ * request storm.
+ */
+let lastRefresh = 0;
+async function refreshQuietly({ force = false } = {}) {
+  if (!S.user) return;
+  const now = Date.now();
+  if (!force && now - lastRefresh < 4000) return;
+  lastRefresh = now;
+  const before = S.week ? `${S.week.week.id}:${S.week.week.status}:${S.week.picks.length}:${S.week.votes.length}:${S.week.bozo?.id || 0}` : 'none';
+  try {
+    await loadState();
+  } catch {
+    return;
+  }
+  const after = S.week ? `${S.week.week.id}:${S.week.week.status}:${S.week.picks.length}:${S.week.votes.length}:${S.week.bozo?.id || 0}` : 'none';
+  if (after !== before) {
+    // Something changed on the server — drop cached views that derive from it.
+    S.leaderboard = null;
+    S.historyRows = null;
+    if (S.tab !== 'pick' || !S.selectedProp) render();
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshQuietly();
+});
+window.addEventListener('focus', () => refreshQuietly());
+// And a slow heartbeat for the tab that never leaves the foreground.
+setInterval(() => { if (document.visibilityState === 'visible') refreshQuietly(); }, 60000);
 
 /* ---------------- shared fragments ---------------- */
 
@@ -410,9 +448,12 @@ function viewWeek() {
       <p class="muted">${raw(
         S.user.is_admin
           ? 'Head to <b>Commissioner</b> and open Week 1 to get things rolling.'
-          : 'Sit tight — the commissioner has not opened a week yet.'
+          : 'Sit tight — the commissioner has not opened a week yet. Meanwhile:'
       )}</p>
-    </div></div>`;
+    </div>
+    <div style="max-width:520px;margin:0 auto">${raw(howItWorksHtml())}</div>
+    <p class="tiny faint center" style="margin-top:12px">Tap your name up top to set your emoji and contact info.</p>
+    </div>`;
   }
 
   const w = S.week.week;
@@ -455,8 +496,12 @@ function viewWeek() {
   /* --- who's in, who's out --- */
   if (!bozo) parts.push(statusStrip());
 
-  /* --- header --- */
+  /* --- personal line, once the week is decided --- */
+  if (w.status === 'final' && mine) parts.push(myWeekLine(mine));
+
+  /* --- header: who pays, what's at stake, and the ticket once it exists --- */
   const showTicket = w.picks_locked;
+  const payer = S.week.payer;
   parts.push(html`<div class="card">
     <div class="card-head">
       <h2>Week ${w.week_number}${raw(w.label ? ` — ${esc(w.label)}` : '')}</h2>
@@ -465,31 +510,22 @@ function viewWeek() {
       ${raw(S.user.is_admin ? quotaBar() : '')}
     </div>
     <div class="grid ${raw(showTicket ? 'two' : '')}">
-      <div>
+      <div class="payline">
         ${raw(
-          S.week.payer
-            ? html`<div class="card tight" style="margin:0 0 12px">
-                <div class="eyebrow">Paying for this week's ticket</div>
-                <div class="row" style="margin-top:6px">
-                  <span style="font-size:26px">${S.week.payer.avatar}</span>
-                  <b style="font-size:16px">${S.week.payer.display_name}</b>
-                  <span class="badge loss">Last week's bozo</span>
-                </div>
-                ${raw(
-                  S.week.payer.venmo
-                    ? html`<div class="tiny faint" style="margin-top:6px">Venmo: ${S.week.payer.venmo}</div>`
-                    : ''
-                )}
+          payer
+            ? html`<span class="payline-av">${payer.avatar}</span>
+              <div>
+                <div><b>${payer.display_name}</b> is paying <span class="faint">· ${money(w.stake_cents)}</span></div>
+                <div class="tiny faint">last week's bozo${raw(payer.venmo ? ` · Venmo ${esc(payer.venmo)}` : '')}${raw(
+                  countdown && w.status === 'open' ? ` · locks in <b>${esc(countdown)}</b>` : ''
+                )}</div>
               </div>`
-            : html`<div class="card tight" style="margin:0 0 12px">
-                <div class="eyebrow">Paying for this week's ticket</div>
-                <p class="muted tiny" style="margin:6px 0 0">Nobody assigned yet — crown a bozo and they inherit the bill.</p>
+            : html`<span class="payline-av">💸</span>
+              <div>
+                <div>Nobody's on the hook yet <span class="faint">· ${money(w.stake_cents)}</span></div>
+                <div class="tiny faint">the first bozo of the season inherits the bill</div>
               </div>`
         )}
-        <div class="row tiny muted">
-          <span>Stake: <b>${money(w.stake_cents)}</b></span>
-          ${raw(countdown ? `<span>·</span><span>Locks in <b>${esc(countdown)}</b></span>` : '')}
-        </div>
       </div>
       ${raw(showTicket ? `<div>${ticket(S.week.parlay, w)}</div>` : '')}
     </div>
@@ -519,9 +555,10 @@ function viewWeek() {
     </div>`);
   }
 
-  /* --- the board --- */
+  /* --- the board: only once it shows something the strip doesn't --- */
   const picks = S.week.picks;
-  parts.push(html`<div class="card">
+  const boardIsNoise = w.status === 'open' && S.settings.hide_picks_until_lock;
+  if (!boardIsNoise) parts.push(html`<div class="card">
     <div class="card-head">
       <h2>The board</h2>
       <span class="badge">${picks.length} / ${S.users.length} in</span>
@@ -557,6 +594,32 @@ function viewWeek() {
   }
 
   return parts.join('');
+}
+
+/** "You went 1-0. Now 3-1, #2 in accuracy." — the line people screenshot. */
+function myWeekLine(mine) {
+  if (!S.leaderboard) {
+    loadLeaderboard();
+    return '';
+  }
+  const acc = S.leaderboard.accuracy || [];
+  const idx = acc.findIndex((a) => a.user.id === S.user.id);
+  const me = idx === -1 ? null : acc[idx];
+  const result = mine.result;
+  const verb = { win: 'cashed', loss: 'lost', push: 'pushed', void: 'voided' }[result] || 'pending';
+  const icon = RESULT_ICON[result] || '';
+  const rank = me && me.qualified ? `#${idx + 1} in accuracy` : me ? 'unranked until 3 picks' : '';
+  return html`<div class="card tight myline">
+    <span style="font-size:24px">${icon}</span>
+    <div>
+      <b>Your week: ${verb}${raw(mine.actual_value !== null && mine.actual_value !== undefined ? ` — ${esc(mine.player)} finished with ${esc(mine.actual_value)}` : '')}</b>
+      ${raw(
+        me
+          ? html`<div class="tiny muted">Season ${me.season.wins}-${me.season.losses} · all-time ${me.all_time.wins}-${me.all_time.losses} (${pct(me.all_time.win_pct)}) · ${rank}</div>`
+          : ''
+      )}
+    </div>
+  </div>`;
 }
 
 function wireWeek() {
@@ -704,10 +767,10 @@ function viewPick() {
       <div class="card-head">
         <h2>1 · Pick a game</h2>
         <div class="spacer"></div>
-        ${raw(quotaBar())}
+        ${raw(S.user.is_admin ? quotaBar() : '')}
         <button class="btn sm ghost" id="refreshEvents" title="Reload the game list (free — costs no credits)">↻ Refresh</button>
       </div>
-      <p class="tiny faint" style="margin-top:-6px">Browsing games is free. Loading props costs credits.</p>
+      ${raw(S.user.is_admin ? '<p class="tiny faint" style="margin-top:-6px">Browsing games is free. Loading props costs credits.</p>' : '')}
       ${raw(slateBar())}
       <div id="eventList" class="grid three">${raw(eventListBody())}</div>
     </div>
@@ -1545,18 +1608,36 @@ function wireVote() {
   }
 }
 
-async function castVote(nomineeId) {
-  const reason = prompt('Why them? (optional — this gets shown to everyone)') ?? '';
-  try {
-    S.week = await api(`/api/weeks/${S.week.week.id}/vote`, {
-      method: 'POST',
-      body: { nominee_id: nomineeId, reason },
-    });
-    toast('Vote cast.', 'ok');
-    render();
-  } catch (err) {
-    toast(err.message, 'err');
-  }
+function castVote(nomineeId) {
+  const who = userById(nomineeId);
+  const m = modal(html`
+    <div class="card-head" style="margin-bottom:4px">
+      <span style="font-size:30px">${who?.avatar || '🤡'}</span>
+      <div><h2 style="font-size:18px">Vote ${who?.display_name || 'them'} as the bozo?</h2>
+        <div class="tiny faint">Your reason is shown to the whole group. Make it count.</div></div>
+    </div>
+    <label class="field" style="margin-top:12px"><span>Why them? <span class="faint">(optional)</span></span>
+      <textarea id="voteReason" maxlength="280" placeholder="Eighteen passing yards. Eighteen."></textarea></label>
+    <div class="row">
+      <button class="btn danger" id="voteGo">🤡 Cast vote</button>
+      <button class="btn ghost" id="voteNo">Never mind</button>
+    </div>
+  `);
+  $('#voteReason', m.el).focus();
+  $('#voteNo', m.el).addEventListener('click', m.close);
+  $('#voteGo', m.el).addEventListener('click', async () => {
+    try {
+      S.week = await api(`/api/weeks/${S.week.week.id}/vote`, {
+        method: 'POST',
+        body: { nominee_id: nomineeId, reason: $('#voteReason', m.el).value.trim() },
+      });
+      m.close();
+      toast('Vote cast.', 'ok');
+      render();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
 }
 
 /* ============================================================
@@ -2428,6 +2509,130 @@ function memberModal(user) {
 }
 
 /* ============================================================
+   First visit
+   ============================================================ */
+
+function howItWorksHtml() {
+  const group = S.settings.group_name || 'the group';
+  return html`
+    <ol class="howto">
+      <li><b>Pick one player prop</b> before the week locks. Live lines are on the Pick tab — or type in whatever your book has.</li>
+      <li><b>Every pick becomes one leg</b> of the ${group} parlay. Whoever's on the hook places it.</li>
+      <li><b>When the games end,</b> results go in and the group votes on the worst pick. That person is the <b>Bozo</b>.</li>
+      <li><b>The Bozo pays for next week's ticket.</b> Forever recorded in the Hall of Shame.</li>
+    </ol>`;
+}
+
+function showIntroOnce() {
+  let seen = false;
+  try { seen = localStorage.getItem('bmb_intro_seen') === '1'; } catch { seen = false; }
+  if (seen) return;
+  const m = modal(html`
+    <div class="center" style="margin-bottom:8px"><span style="font-size:44px">🤡</span></div>
+    <h2 class="center" style="font-size:20px;margin-bottom:4px">Welcome to ${S.settings.group_name || 'Blue Man Bozo'}</h2>
+    <p class="center tiny muted" style="margin-bottom:14px">Thirty seconds on how this works.</p>
+    ${raw(howItWorksHtml())}
+    <p class="tiny faint" style="margin:12px 0 14px">Tap your name up top to set your emoji, and your email or phone so the weekly reminders reach you.</p>
+    <button class="btn primary block" id="introGo">Got it — let's go</button>
+  `);
+  $('#introGo', m.el).addEventListener('click', () => {
+    try { localStorage.setItem('bmb_intro_seen', '1'); } catch { /* private mode */ }
+    m.close();
+  });
+}
+
+/* ============================================================
+   Profile — the one place a member manages themselves
+   ============================================================ */
+
+const AVATAR_PICKS = ['🤡','👑','🎺','🥁','🎷','🪘','🎸','🎹','🎻','🏈','🍺','🔥','💀','🦍','🐐','🦆','🌵','🍕','🎯','🚀','🧊','🐍','🦈','🍀'];
+
+function profileModal() {
+  const u = S.user;
+  const m = modal(html`
+    <div class="card-head" style="margin-bottom:6px">
+      <span style="font-size:34px" id="pfPreview">${u.avatar}</span>
+      <div><h2 style="font-size:18px">${u.display_name}</h2><div class="tiny faint">@${u.username}</div></div>
+    </div>
+
+    <div class="eyebrow" style="margin:14px 0 6px">Your emoji</div>
+    <div class="chips" style="margin-bottom:12px">
+      ${raw(AVATAR_PICKS.map((e) => html`<button class="chip ${e === u.avatar ? 'in' : ''}" data-av="${e}" style="padding:6px 10px;font-size:19px">${e}</button>`).join(''))}
+    </div>
+
+    <label class="field"><span>Display name</span><input id="pfName" maxlength="40" value="${u.display_name || ''}"></label>
+    <div class="grid two">
+      <label class="field"><span>Email <span class="faint">— for the weekly digests</span></span>
+        <input id="pfEmail" type="email" value="${u.email || ''}" placeholder="you@example.com"></label>
+      <label class="field"><span>Phone <span class="faint">— for texts</span></span>
+        <input id="pfPhone" value="${u.phone || ''}" placeholder="+15551234567"></label>
+    </div>
+    <label class="field"><span>Venmo <span class="faint">— shown when you owe the ticket</span></span>
+      <input id="pfVenmo" value="${u.venmo || ''}" placeholder="@your-handle"></label>
+    <button class="btn primary" id="pfSave">Save profile</button>
+
+    <hr class="sep">
+    <div class="eyebrow" style="margin-bottom:8px">Change password</div>
+    <div class="grid two">
+      <label class="field"><span>Current</span><input id="pfCur" type="password" autocomplete="current-password"></label>
+      <label class="field"><span>New <span class="faint">(8+ chars)</span></span><input id="pfNew" type="password" autocomplete="new-password"></label>
+    </div>
+    <div class="row">
+      <button class="btn" id="pfPw">Update password</button>
+      <button class="btn ghost" id="pfClose">Done</button>
+    </div>
+  `);
+
+  let avatar = u.avatar;
+  $$('[data-av]', m.el).forEach((b) =>
+    b.addEventListener('click', () => {
+      avatar = b.dataset.av;
+      $$('[data-av]', m.el).forEach((x) => x.classList.toggle('in', x.dataset.av === avatar));
+      $('#pfPreview', m.el).textContent = avatar;
+    })
+  );
+
+  $('#pfClose', m.el).addEventListener('click', m.close);
+
+  $('#pfSave', m.el).addEventListener('click', async () => {
+    try {
+      const res = await api('/api/auth/profile', {
+        method: 'PATCH',
+        body: {
+          display_name: $('#pfName', m.el).value.trim(),
+          email: $('#pfEmail', m.el).value.trim(),
+          phone: $('#pfPhone', m.el).value.trim(),
+          venmo: $('#pfVenmo', m.el).value.trim(),
+          avatar,
+        },
+      });
+      S.user = res.user;
+      $('#userAvatar').textContent = S.user.avatar;
+      $('#userName').textContent = S.user.display_name;
+      toast('Profile saved.', 'ok');
+      await loadState();
+      render();
+    } catch (err) {
+      toast(err.message, 'err', 6000);
+    }
+  });
+
+  $('#pfPw', m.el).addEventListener('click', async () => {
+    try {
+      await api('/api/auth/change-password', {
+        method: 'POST',
+        body: { current_password: $('#pfCur', m.el).value, new_password: $('#pfNew', m.el).value },
+      });
+      toast('Password changed.', 'ok');
+      $('#pfCur', m.el).value = '';
+      $('#pfNew', m.el).value = '';
+    } catch (err) {
+      toast(err.message, 'err', 6000);
+    }
+  });
+}
+
+/* ============================================================
    Bootstrap
    ============================================================ */
 
@@ -2452,10 +2657,14 @@ async function boot() {
   $('#userChip').hidden = false;
   $('#userAvatar').textContent = S.user.avatar;
   $('#userName').textContent = S.user.display_name;
-  $('#logoutBtn').addEventListener('click', async () => {
+  $('#logoutBtn').addEventListener('click', async (e) => {
+    e.stopPropagation();
     await api('/api/auth/logout', { method: 'POST' });
     window.location.href = '/login';
   });
+  $('#userChip').addEventListener('click', profileModal);
+  $('#userChip').style.cursor = 'pointer';
+  $('#userChip').title = 'Your profile';
 
   // The manual-entry form and admin market list both need the catalog.
   try {
@@ -2469,9 +2678,11 @@ async function boot() {
   render();
 
   if (S.week && S.week.week.status === 'open') loadEvents();
-  if (S.week && S.week.bozo && S.week.bozo.user_id === S.user.id) {
+  if (S.tab === 'week' && S.week && S.week.bozo && S.week.bozo.user_id === S.user.id) {
     setTimeout(() => confetti(['#ef4444', '#f59e0b', '#ffffff']), 400);
   }
+
+  showIntroOnce();
 }
 
 boot();

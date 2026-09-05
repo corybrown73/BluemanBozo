@@ -22,6 +22,10 @@ one of the stragglers. The Make a Pick tab carries a dot until you've picked. On
 the week locks, the ticket and everyone's picks appear; once it's graded, the
 results and the Bozo Index; once it's final, the bozo and the roast.
 
+**Tap your name** in the header to set your emoji, display name, email and phone
+(so the weekly reminders reach you), Venmo, and password. First login gets a
+thirty-second "how this works" — once.
+
 **Hall of Shame** leads with the group — season win rate, tickets cashed,
 all-time — then an **Accuracy** ranking (who's actually good at this, by win
 rate, season and all-time records), then the bozo standings, worst picks ever,
