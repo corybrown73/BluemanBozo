@@ -32,21 +32,21 @@ const SPORT = 'americanfootball_nfl';
  * occasionally post something strange and we are not the line police.
  */
 const MARKETS = [
-  { key: 'player_pass_yds',           label: 'Passing Yards',     unit: 'yds',   type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], plausible: [75, 450] },
-  { key: 'player_pass_tds',           label: 'Passing TDs',       unit: 'TDs',   type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], plausible: [0.5, 5.5] },
-  { key: 'player_pass_attempts',      label: 'Pass Attempts',     unit: 'att',   type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], plausible: [8, 60] },
-  { key: 'player_pass_completions',   label: 'Completions',       unit: 'comp',  type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], plausible: [5, 42] },
-  { key: 'player_pass_interceptions', label: 'Interceptions',     unit: 'INTs',  type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], plausible: [0.5, 2.5] },
-  { key: 'player_rush_yds',           label: 'Rushing Yards',     unit: 'yds',   type: 'ou',    group: 'Rushing',    sides: ['Over', 'Under'], plausible: [2.5, 200] },
-  { key: 'player_rush_attempts',      label: 'Rush Attempts',     unit: 'att',   type: 'ou',    group: 'Rushing',    sides: ['Over', 'Under'], plausible: [1.5, 32] },
-  { key: 'player_reception_yds',      label: 'Receiving Yards',   unit: 'yds',   type: 'ou',    group: 'Receiving',  sides: ['Over', 'Under'], plausible: [2.5, 160] },
-  { key: 'player_receptions',         label: 'Receptions',        unit: 'rec',   type: 'ou',    group: 'Receiving',  sides: ['Over', 'Under'], plausible: [0.5, 14] },
-  { key: 'player_rush_reception_yds', label: 'Rush + Rec Yards',  unit: 'yds',   type: 'ou',    group: 'Combo',      sides: ['Over', 'Under'], plausible: [5, 250] },
-  { key: 'player_kicking_points',     label: 'Kicking Points',    unit: 'pts',   type: 'ou',    group: 'Kicking',    sides: ['Over', 'Under'], plausible: [2.5, 16] },
-  { key: 'player_tackles_assists',    label: 'Tackles + Assists', unit: 'tkl',   type: 'ou',    group: 'Defense',    sides: ['Over', 'Under'], plausible: [1.5, 16] },
-  { key: 'player_sacks',              label: 'Sacks',             unit: 'sacks', type: 'ou',    group: 'Defense',    sides: ['Over', 'Under'], plausible: [0.5, 2.5] },
-  { key: 'player_anytime_td',         label: 'Anytime TD',        unit: 'TDs',   type: 'yesno', group: 'Touchdowns', sides: ['Yes', 'No'],     plausible: null },
-  { key: 'player_1st_td',             label: 'First TD Scorer',   unit: 'TDs',   type: 'yesno', group: 'Touchdowns', sides: ['Yes', 'No'],     plausible: null },
+  { key: 'player_pass_yds',           label: 'Passing Yards',     unit: 'yds',   type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], short: 'Yards', plausible: [75, 450] },
+  { key: 'player_pass_tds',           label: 'Passing TDs',       unit: 'TDs',   type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], short: 'TDs', plausible: [0.5, 5.5] },
+  { key: 'player_pass_attempts',      label: 'Pass Attempts',     unit: 'att',   type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], short: 'Att', plausible: [8, 60] },
+  { key: 'player_pass_completions',   label: 'Completions',       unit: 'comp',  type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], short: 'Comp', plausible: [5, 42] },
+  { key: 'player_pass_interceptions', label: 'Interceptions',     unit: 'INTs',  type: 'ou',    group: 'Passing',    sides: ['Over', 'Under'], short: 'INT', plausible: [0.5, 2.5] },
+  { key: 'player_rush_yds',           label: 'Rushing Yards',     unit: 'yds',   type: 'ou',    group: 'Rushing',    sides: ['Over', 'Under'], short: 'Yards', plausible: [2.5, 200] },
+  { key: 'player_rush_attempts',      label: 'Rush Attempts',     unit: 'att',   type: 'ou',    group: 'Rushing',    sides: ['Over', 'Under'], short: 'Att', plausible: [1.5, 32] },
+  { key: 'player_reception_yds',      label: 'Receiving Yards',   unit: 'yds',   type: 'ou',    group: 'Receiving',  sides: ['Over', 'Under'], short: 'Yards', plausible: [2.5, 160] },
+  { key: 'player_receptions',         label: 'Receptions',        unit: 'rec',   type: 'ou',    group: 'Receiving',  sides: ['Over', 'Under'], short: 'Rec', plausible: [0.5, 14] },
+  { key: 'player_rush_reception_yds', label: 'Rush + Rec Yards',  unit: 'yds',   type: 'ou',    group: 'Combo',      sides: ['Over', 'Under'], short: 'Rush+Rec', plausible: [5, 250] },
+  { key: 'player_kicking_points',     label: 'Kicking Points',    unit: 'pts',   type: 'ou',    group: 'Kicking',    sides: ['Over', 'Under'], short: 'Points', plausible: [2.5, 16] },
+  { key: 'player_tackles_assists',    label: 'Tackles + Assists', unit: 'tkl',   type: 'ou',    group: 'Defense',    sides: ['Over', 'Under'], short: 'Tkl+Ast', plausible: [1.5, 16] },
+  { key: 'player_sacks',              label: 'Sacks',             unit: 'sacks', type: 'ou',    group: 'Defense',    sides: ['Over', 'Under'], short: 'Sacks', plausible: [0.5, 2.5] },
+  { key: 'player_anytime_td',         label: 'Anytime TD',        unit: 'TDs',   type: 'yesno', group: 'Touchdowns', sides: ['Yes', 'No'],     short: 'Anytime', plausible: null },
+  { key: 'player_1st_td',             label: 'First TD Scorer',   unit: 'TDs',   type: 'yesno', group: 'Touchdowns', sides: ['Yes', 'No'],     short: 'First TD', plausible: null },
 ];
 
 const MARKET_BY_KEY = new Map(MARKETS.map((m) => [m.key, m]));
@@ -384,6 +384,7 @@ function normalizeProps(raw) {
           bets.set(key, {
             market: market.key,
             market_label: meta.label,
+            market_short: meta.short || meta.label,
             market_group: meta.group,
             market_type: meta.type,
             unit: meta.unit,

@@ -16,7 +16,8 @@
     "import-csv": "node scripts/import-csv.js",
     "test": "node --test test/*.test.js",
     "check-odds": "node scripts/check-odds.js",
-    "check-injuries": "node scripts/check-injuries.js"
+    "check-injuries": "node scripts/check-injuries.js",
+    "check-roster": "node scripts/check-roster.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

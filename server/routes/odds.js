@@ -3,6 +3,7 @@
 const express = require('express');
 const odds = require('../odds');
 const altlines = require('../altlines');
+const roster = require('../roster');
 const { requireAuth, requireAdmin } = require('../auth');
 const { getSetting } = require('../db');
 
@@ -44,7 +45,8 @@ router.get('/events/:eventId/props', async (req, res) => {
     const markets = requestedMarkets(req);
     const force = req.query.force === '1' && req.user.is_admin;
     const result = await odds.getEventProps(req.params.eventId, { markets, force });
-    res.json({ ...result, quota: odds.quotaStatus() });
+    const tagged = await roster.tagProps(result.props);
+    res.json({ ...result, roster_available: tagged.roster_available, quota: odds.quotaStatus() });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -67,7 +69,8 @@ router.get('/slate', async (req, res) => {
     const markets = requestedMarkets(req);
     const force = req.query.force === '1' && req.user.is_admin;
     const result = await odds.getSlateProps({ markets, force });
-    res.json({ ...result, quota: odds.quotaStatus() });
+    const tagged = await roster.tagProps(result.props);
+    res.json({ ...result, roster_available: tagged.roster_available, quota: odds.quotaStatus() });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }

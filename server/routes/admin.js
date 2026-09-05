@@ -8,6 +8,7 @@ const notify = require('../notify');
 const game = require('../game');
 const scheduler = require('../scheduler');
 const injuries = require('../injuries');
+const rosterFeed = require('../roster');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -275,6 +276,20 @@ router.get('/injuries', async (req, res) => {
     stale: result.stale || false,
     error: result.error || null,
     sample: result.injuries.slice(0, 8),
+  });
+});
+
+/** Verify the free ESPN roster feed that powers grouping by team. */
+router.get('/roster', async (req, res) => {
+  const result = await rosterFeed.getRoster({ force: req.query.force === '1' });
+  res.json({
+    available: Boolean(result.roster),
+    players: result.roster ? Object.keys(result.roster.players).length : 0,
+    teams: result.roster ? result.roster.teams.length : 0,
+    rosters_loaded: result.roster?.rosters_loaded ?? 0,
+    cached: result.cached,
+    stale: result.stale || false,
+    error: result.error || null,
   });
 });
 

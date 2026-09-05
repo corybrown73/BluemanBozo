@@ -183,6 +183,9 @@ const S = {
   curveIndex: null,   // which rung of the ladder is chosen
   priceOverride: '',  // real price typed off the picker's own book
   propSource: 'game',   // 'game' = one matchup | 'slate' = every game at once
+  propCategory: 'Passing',  // active category pill
+  propGroupBy: 'game',      // 'game' | 'team' | 'player'
+  propSide: 'Over',         // which side the O/U cells show
   manualMarket: null,   // market chosen in the by-hand form
   slateEstimate: null,
   slateLoading: false,
@@ -784,7 +787,7 @@ function viewPick() {
 
     <div class="card">
       <div class="card-head"><h2>${raw(
-        S.selectedEvent || S.propSource === 'slate' ? '3' : '2'
+        S.selectedProp !== null ? '4' : S.selectedEvent || S.propSource === 'slate' ? '3' : '2'
       )} · Or enter it by hand</h2></div>
       <p class="tiny faint" style="margin-top:-6px">If the book you use has a number the API doesn't, type it in.</p>
       ${raw(manualForm())}
@@ -856,6 +859,15 @@ function eventListBody() {
     .join('');
 }
 
+/* ---------------- the prop board ---------------- */
+
+/**
+ * A DraftKings-shaped board: category pills across the top, then one section
+ * per game (or team), then a row per player with a column per market in that
+ * category. The old layout was a flat list of every player+market+side, which
+ * meant Josh Allen appeared six times and you scrolled past four of him to find
+ * the fifth. Here he is one row, and his passing numbers sit side by side.
+ */
 function propBoard() {
   const ev = S.selectedEvent;
   if (S.propsLoading || S.slateLoading) {
@@ -867,7 +879,6 @@ function propBoard() {
     return html`<div class="card">
       <div class="card-head"><h2>2 · Pick a player prop</h2></div>
       <div class="empty">
-        <div class="big">📉</div>
         <p class="muted">No props loaded for ${esc(ev.away_team)} @ ${esc(ev.home_team)}.</p>
         <button class="btn primary" id="loadProps">Load the board</button>
       </div>
@@ -875,119 +886,210 @@ function propBoard() {
   }
 
   const slate = S.propSource === 'slate';
-  const filter = S.propFilter.trim().toLowerCase();
   const all = S.props.props;
-  const matched = all.filter(
+
+  // Categories present in this board, in a fixed running order.
+  const ORDER = ['Touchdowns', 'Passing', 'Rushing', 'Receiving', 'Combo', 'Kicking', 'Defense'];
+  const present = [...new Set(all.map((p) => p.market_group))].sort(
+    (a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99)
+  );
+  const category = present.includes(S.propCategory) ? S.propCategory : present[0];
+
+  const filter = S.propFilter.trim().toLowerCase();
+  const inCategory = all.filter((p) => p.market_group === category);
+  const matched = inCategory.filter(
     (p) =>
       !filter ||
       p.player.toLowerCase().includes(filter) ||
-      p.market_label.toLowerCase().includes(filter) ||
+      (p.team || '').toLowerCase().includes(filter) ||
       (p.game_label || '').toLowerCase().includes(filter)
   );
 
-  // Whole-slate mode is for searching, not scrolling: a few hundred props makes
-  // a page tens of thousands of pixels tall. Show nothing until they type, then
-  // cap what comes back.
-  const awaitingSearch = slate && !filter;
-  const LIMIT = slate ? 80 : 250;
-  const rows = awaitingSearch ? [] : matched.slice(0, LIMIT);
-  const trimmed = matched.length - rows.length;
+  // Columns: the markets in this category that actually came back.
+  const columns = [];
+  for (const p of matched) {
+    if (!columns.some((c) => c.market === p.market)) {
+      columns.push({ market: p.market, short: p.market_short || p.market_label, label: p.market_label, type: p.market_type });
+    }
+  }
+  columns.sort((a, b) => a.short.localeCompare(b.short));
 
-  const byGroup = {};
-  for (const p of rows) (byGroup[p.market_label] = byGroup[p.market_label] || []).push(p);
+  const hasOU = columns.some((c) => c.type === 'ou');
+  const canGroupByTeam = Boolean(S.props.roster_available);
+  const groupBy = !canGroupByTeam && S.propGroupBy === 'team' ? 'game' : S.propGroupBy;
+
+  const sections = groupProps(matched, groupBy, slate);
+  const totalRows = sections.reduce((n, sec) => n + sec.rows.length, 0);
 
   const cacheNote = slate
     ? S.props.cost === 0
-      ? `${S.props.games.length} games · all cached — free`
-      : `${S.props.games.length} games · cost ${S.props.cost} credits`
+      ? `${S.props.games.length} games · cached`
+      : `${S.props.games.length} games · ${S.props.cost} credits`
     : S.props.cached
-    ? `cached${S.props.fetched_at ? ' ' + fmtKickoff(S.props.fetched_at) : ''} — free`
-    : `fresh — cost ${S.props.cost} credit${S.props.cost === 1 ? '' : 's'}`;
+    ? 'cached'
+    : `${S.props.cost} credits`;
 
-  return html`<div class="card">
+  return html`<div class="card board">
     <div class="card-head">
       <h2>2 · Pick a player prop</h2>
-      <span class="badge">${raw(slate ? `${esc(all.length)} props · whole slate` : `${esc(ev.away_team)} @ ${esc(ev.home_team)}`)}</span>
+      <span class="badge">${raw(slate ? `${esc(all.length)} props` : `${esc(ev.away_team)} @ ${esc(ev.home_team)}`)}</span>
       <div class="spacer"></div>
       <span class="tiny faint">${cacheNote}</span>
-      ${raw(!slate && S.user.is_admin ? '<button class="btn sm ghost" id="forceProps" title="Bypass the cache — costs credits">↻ Force</button>' : '')}
+      ${raw(!slate && S.user.is_admin ? '<button class="btn sm ghost" id="forceProps" title="Bypass the cache — costs credits">Refresh</button>' : '')}
     </div>
-    <input id="propFilter" placeholder="${raw(
-      slate ? 'Search any player, market or matchup…' : 'Filter by player or market…'
-    )}" value="${S.propFilter}" style="margin-bottom:12px">
+
+    <div class="pill-row" role="tablist" aria-label="Prop category">
+      ${raw(
+        present
+          .map(
+            (g) => html`<button class="pill ${g === category ? 'active' : ''}" data-cat="${g}" role="tab"
+              aria-selected="${g === category ? 'true' : 'false'}">${g}</button>`
+          )
+          .join('')
+      )}
+    </div>
+
+    <div class="board-controls">
+      <div class="seg" role="group" aria-label="Group by">
+        <button class="seg-btn ${groupBy === 'game' ? 'active' : ''}" data-group="game">By game</button>
+        ${raw(
+          canGroupByTeam
+            ? html`<button class="seg-btn ${groupBy === 'team' ? 'active' : ''}" data-group="team">By team</button>`
+            : ''
+        )}
+        <button class="seg-btn ${groupBy === 'player' ? 'active' : ''}" data-group="player">A–Z</button>
+      </div>
+      ${raw(
+        hasOU
+          ? html`<div class="seg" role="group" aria-label="Side">
+              <button class="seg-btn ${S.propSide === 'Over' ? 'active' : ''}" data-side="Over">Over</button>
+              <button class="seg-btn ${S.propSide === 'Under' ? 'active' : ''}" data-side="Under">Under</button>
+            </div>`
+          : ''
+      )}
+      <input id="propFilter" class="board-search" placeholder="Search players" value="${S.propFilter}">
+    </div>
+
     ${raw(
       S.props.failures && S.props.failures.length
-        ? html`<p class="tiny text-warn">⚠️ ${S.props.failures.length} game${raw(
+        ? html`<p class="tiny text-warn">${S.props.failures.length} game${raw(
             S.props.failures.length === 1 ? '' : 's'
           )} could not be loaded: ${raw(S.props.failures.map((f) => esc(f.game)).join(', '))}</p>`
         : ''
     )}
-    ${raw(slate ? marketChips() : '')}
+
     ${raw(
-      !awaitingSearch && trimmed > 0
-        ? html`<p class="tiny faint">Showing ${rows.length} of ${matched.length} matches — keep typing to narrow it down.</p>`
-        : ''
+      totalRows === 0
+        ? html`<div class="empty"><p class="muted">No ${esc(category.toLowerCase())} props match that search.</p></div>`
+        : sections.map((sec) => propSection(sec, columns)).join('')
     )}
+  </div>
+
+  ${raw(S.selectedProp !== null && S.props.props[S.selectedProp] ? confirmPanel() : '')}`;
+}
+
+/** Pivot the flat prop list into sections → player rows → per-market cells. */
+function groupProps(props, groupBy, slate) {
+  const byKey = new Map();
+
+  for (const p of props) {
+    let key;
+    let title;
+    let subtitle = '';
+    if (groupBy === 'team') {
+      key = p.team || 'Team unknown';
+      title = key;
+    } else if (groupBy === 'player') {
+      key = '__all__';
+      title = 'All players';
+    } else {
+      key = p.event_id || (slate ? p.game_label : 'game');
+      title = p.game_label || (S.selectedEvent ? `${S.selectedEvent.away_team} @ ${S.selectedEvent.home_team}` : 'This game');
+      subtitle = p.commence_time ? fmtKickoff(p.commence_time) : '';
+    }
+
+    if (!byKey.has(key)) byKey.set(key, { key, title, subtitle, players: new Map() });
+    const section = byKey.get(key);
+
+    if (!section.players.has(p.player)) {
+      section.players.set(p.player, {
+        player: p.player, team: p.team, team_abbr: p.team_abbr, position: p.position, cells: new Map(),
+      });
+    }
+    const row = section.players.get(p.player);
+
+    // Each cell holds both sides so the Over/Under switch is instant.
+    if (!row.cells.has(p.market)) row.cells.set(p.market, {});
+    row.cells.get(p.market)[p.selection] = p;
+  }
+
+  return [...byKey.values()]
+    .map((sec) => ({
+      ...sec,
+      rows: [...sec.players.values()].sort((a, b) => a.player.localeCompare(b.player)),
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title));
+}
+
+function propSection(section, columns) {
+  const single = section.key === '__all__';
+  return html`<div class="board-section">
     ${raw(
-      awaitingSearch
-        ? html`<div class="empty" style="padding:30px 20px">
-            <div class="big">🔎</div>
-            <p class="muted"><b>${all.length}</b> props across <b>${S.props.games.length}</b> games are loaded.</p>
-            <p class="tiny faint">Type a player's name above — or tap a market to browse it.</p>
+      single
+        ? ''
+        : html`<div class="board-section-head">
+            <b>${section.title}</b>
+            ${raw(section.subtitle ? html`<span class="tiny faint">${section.subtitle}</span>` : '')}
           </div>`
-        : rows.length
-        ? Object.entries(byGroup)
-            .map(
-              ([label, list]) => html`<div style="margin-bottom:16px">
-                <div class="eyebrow" style="margin-bottom:7px">${label}</div>
-                ${raw(
-                  list
-                    .map((p, i) => {
-                      const idx = S.props.props.indexOf(p);
-                      const sel = S.selectedProp === idx;
-                      return html`<button class="proprow ${sel ? 'selected' : ''}" data-prop="${idx}"><div class="pname">
-                          <b>${p.player}</b>
-                          <small>${p.selection}${raw(p.line !== null && p.line !== undefined ? ' ' + esc(p.line) : '')} · ${raw(
-                            p.game_label ? `${esc(p.game_label)} · ` : ''
-                          )}best at ${p.bookmaker}${raw(
-                            p.line_varies ? ` · books range ${esc(p.line_min)}–${esc(p.line_max)}` : ''
-                          )}${raw(p.book_count > 1 ? ` · ${esc(p.book_count)} books` : '')}</small>
-                        </div>
-                        <div class="pline">${raw(p.line !== null && p.line !== undefined ? esc(p.line) : '—')}</div>
-                        <div class="pprice">${oddsStr(p.price)}</div>
-                      </button>`;
-                    })
-                    .join('')
-                )}
-              </div>`
-            )
-            .join('')
-        : '<div class="empty"><p class="muted">Nothing matches that filter.</p></div>'
     )}
-    ${raw(S.selectedProp !== null && S.props.props[S.selectedProp] ? confirmPanel() : '')}
+    <div class="board-grid" style="--cols:${raw(columns.length)}">
+      <div class="board-row board-head">
+        <div class="board-player"></div>
+        ${raw(columns.map((c) => html`<div class="board-col">${c.short}</div>`).join(''))}
+      </div>
+      ${raw(section.rows.map((row) => propRow(row, columns)).join(''))}
+    </div>
   </div>`;
 }
 
-/** One chip per market on the loaded board — tap to browse that market slate-wide. */
-function marketChips() {
-  const counts = new Map();
-  for (const p of S.props.props) counts.set(p.market_label, (counts.get(p.market_label) || 0) + 1);
-  const active = S.propFilter.trim().toLowerCase();
-  return html`<div class="tabs" style="padding:0 0 12px;flex-wrap:wrap">
-    ${raw(
-      [...counts.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .map(
-          ([label, n]) => html`<button class="tab ${active === label.toLowerCase() ? 'active' : ''}"
-            data-chip="${label}" style="font-size:12px;padding:6px 12px">${label} <span class="faint">${n}</span></button>`
-        )
-        .join('')
-    )}
-    ${raw(active ? '<button class="tab" data-chip="" style="font-size:12px;padding:6px 12px">Clear</button>' : '')}
+function propRow(row, columns) {
+  return html`<div class="board-row">
+    <div class="board-player">
+      <b>${row.player}</b>
+      ${raw(
+        row.team
+          ? html`<span class="tiny faint">${raw(row.position ? `${esc(row.position)} · ` : '')}${row.team_abbr || row.team}</span>`
+          : ''
+      )}
+    </div>
+    ${raw(columns.map((c) => propCell(row.cells.get(c.market), c)).join(''))}
   </div>`;
 }
 
-/** Where the chosen prop gets fine-tuned before it's locked in. */
+/** One tappable odds button. Empty markets get a dash, not a dead button. */
+function propCell(sides, column) {
+  if (!sides) return '<div class="board-cell empty-cell">—</div>';
+
+  // Yes/No markets have one side; Over/Under follows the board switch, falling
+  // back to whichever side the book actually posted.
+  const pick =
+    column.type === 'yesno'
+      ? sides.Yes || sides.No || Object.values(sides)[0]
+      : sides[S.propSide] || sides.Over || sides.Under;
+  if (!pick) return '<div class="board-cell empty-cell">—</div>';
+
+  const idx = S.props.props.indexOf(pick);
+  const selected = S.selectedProp === idx;
+  const line = pick.line === null || pick.line === undefined ? null : pick.line;
+
+  return html`<button class="board-cell ${selected ? 'selected' : ''}" data-prop="${idx}"
+    aria-label="${pick.player} ${pick.selection} ${raw(line !== null ? esc(line) : '')} ${column.label} ${oddsStr(pick.price)}">
+    ${raw(line !== null ? html`<span class="cell-line">${line}</span>` : '')}
+    <span class="cell-price">${raw(line !== null ? `${esc(pick.selection[0])} ` : '')}${oddsStr(pick.price)}</span>
+  </button>`;
+}
+
+
 function confirmPanel() {
   const p = S.props.props[S.selectedProp];
   const rung = S.curve && S.curveIndex !== null ? S.curve.ladder[S.curveIndex] : null;
@@ -997,7 +1099,12 @@ function confirmPanel() {
   const finalPrice = override !== '' && Number.isFinite(Number(override)) ? Number(override) : modelPrice;
   const slid = rung ? !rung.is_posted : false;
 
-  return html`<hr class="sep">
+  const meta = S.marketCatalog?.find((m) => m.key === p.market);
+  const sides = meta?.sides || (p.market_type === 'yesno' ? ['Yes', 'No'] : ['Over', 'Under']);
+
+  return html`<div class="card confirm-card">
+    <div class="card-head"><h2>3 · Confirm your pick</h2><div class="spacer"></div>
+      <button class="btn sm ghost" id="clearProp">Cancel</button></div>
     <div class="card tight accent-edge" style="margin:0 0 12px">
       <div class="row" style="margin-bottom:${raw(S.curve ? '12px' : '0')}">
         <span style="font-size:22px">🎯</span>
@@ -1016,6 +1123,20 @@ function confirmPanel() {
           )}</div>
         </div>
       </div>
+
+      ${raw(
+        sides.length === 2 && p.market_type === 'ou'
+          ? html`<div class="seg seg-wide" role="group" aria-label="Side" style="margin-bottom:12px">
+              ${raw(
+                sides
+                  .map(
+                    (sd) => html`<button class="seg-btn ${sd === p.selection ? 'active' : ''}" data-flip="${sd}">${sd}</button>`
+                  )
+                  .join('')
+              )}
+            </div>`
+          : ''
+      )}
 
       ${raw(
         S.curve
@@ -1060,7 +1181,8 @@ function confirmPanel() {
           ? 'Set a price to lock this in'
           : `Lock in ${esc(p.player)} ${esc(p.selection)}${line !== null ? ' ' + esc(line) : ''} (${esc(oddsStr(finalPrice))})`
       )}
-    </button>`;
+    </button>
+  </div>`;
 }
 
 function describeProp(p) {
@@ -1313,13 +1435,64 @@ function wirePick() {
     });
   }
 
-  $$('[data-chip]').forEach((btn) =>
+  $$('[data-cat]').forEach((btn) =>
     btn.addEventListener('click', () => {
-      S.propFilter = btn.dataset.chip;
+      S.propCategory = btn.dataset.cat;
       S.selectedProp = null;
+      S.curve = null;
       render();
     })
   );
+
+  $$('[data-group]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      S.propGroupBy = btn.dataset.group;
+      render();
+    })
+  );
+
+  $$('[data-side]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      S.propSide = btn.dataset.side;
+      S.selectedProp = null;
+      S.curve = null;
+      render();
+    })
+  );
+
+  // Flip the chosen pick to the other side without leaving the confirm panel.
+  $$('[data-flip]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const cur = S.props.props[S.selectedProp];
+      if (!cur) return;
+      const other = S.props.props.findIndex(
+        (q) =>
+          q.market === cur.market &&
+          q.player === cur.player &&
+          (q.event_id || null) === (cur.event_id || null) &&
+          q.selection === btn.dataset.flip
+      );
+      if (other === -1) return toast('That side is not on the board.', 'err');
+      S.selectedProp = other;
+      S.curve = null;
+      S.priceOverride = '';
+      render();
+      loadCurve();
+    })
+  );
+
+  // Only mask the edge of grids that actually overflow.
+  $$('.board-grid').forEach((g) => g.classList.toggle('fits', g.scrollWidth <= g.clientWidth + 1));
+
+  const clearProp = $('#clearProp');
+  if (clearProp) {
+    clearProp.addEventListener('click', () => {
+      S.selectedProp = null;
+      S.curve = null;
+      S.priceOverride = '';
+      render();
+    });
+  }
 
   $$('[data-prop]').forEach((btn) =>
     btn.addEventListener('click', () => {
