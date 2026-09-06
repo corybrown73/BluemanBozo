@@ -96,6 +96,8 @@ function describePick(p) {
 function toast(message, kind = 'info', ms = 3800) {
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
+  // The wrap is aria-live="polite"; errors get promoted so they interrupt.
+  if (kind === 'err') el.setAttribute('role', 'alert');
   el.textContent = message;
   $('#toasts').appendChild(el);
   setTimeout(() => {
@@ -106,17 +108,28 @@ function toast(message, kind = 'info', ms = 3800) {
 }
 
 function modal(innerHtml) {
+  const opener = document.activeElement;
   const back = document.createElement('div');
   back.className = 'modal-back';
-  back.innerHTML = `<div class="modal">${innerHtml}</div>`;
+  back.innerHTML = `<div class="modal" role="dialog" aria-modal="true" tabindex="-1">${innerHtml}</div>`;
   back.addEventListener('click', (e) => { if (e.target === back) close(); });
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
   function close() {
     document.removeEventListener('keydown', onKey);
     back.remove();
+    // Put the caret back where it came from, or the next Tab starts at the top.
+    if (opener && document.contains(opener)) opener.focus();
   }
   $('#modalRoot').appendChild(back);
+  back.querySelectorAll('[data-close-modal]').forEach((b) => b.addEventListener('click', close));
+  const box = back.querySelector('.modal');
+  const h = box.querySelector('h2');
+  if (h) {
+    if (!h.id) h.id = 'modalTitle' + Math.random().toString(36).slice(2, 8);
+    box.setAttribute('aria-labelledby', h.id);
+  }
+  (box.querySelector('input, select, textarea, button') || box).focus();
   return { el: back, close };
 }
 
@@ -158,7 +171,7 @@ async function api(path, options = {}) {
     throw new Error('Signed out.');
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
+  if (!res.ok) throw new Error(data.error || 'Something broke on our end. Try again.');
   return data;
 }
 
@@ -185,7 +198,6 @@ const S = {
   events: [],
   eventsState: 'idle', // idle | loading | ready | error
   eventsError: null,
-  eventsMeta: null,
   selectedEvent: null,
   props: null,
   propsLoading: false,
@@ -237,7 +249,7 @@ const TABS = [
   { key: 'vote', label: 'Vote', short: 'Vote' },
   { key: 'shame', label: 'Hall of Shame', short: 'Shame' },
   { key: 'history', label: 'History', short: 'History' },
-  { key: 'admin', label: 'Commissioner', short: 'Admin', adminOnly: true },
+  { key: 'admin', label: 'Commissioner', short: 'Commish', adminOnly: true },
 ];
 
 function renderTabs() {
@@ -245,8 +257,8 @@ function renderTabs() {
   const needsPick = S.week && S.week.week.status === 'open' && !myPick();
   $('#tabs').innerHTML = TABS.filter((t) => !t.adminOnly || S.user?.is_admin)
     .map(
-      (t) => html`<button class="tab ${t.key === S.tab ? 'active' : ''}" data-tab="${t.key}"><span class="tab-full">${t.label}</span><span class="tab-short">${t.short}</span>${raw(
-        (t.key === 'vote' && needsVote) || (t.key === 'pick' && needsPick) ? '<span class="dot"></span>' : ''
+      (t) => html`<button class="tab ${t.key === S.tab ? 'active' : ''}" data-tab="${t.key}" aria-current="${t.key === S.tab ? 'page' : 'false'}"><span class="tab-full">${t.label}</span><span class="tab-short">${t.short}</span>${raw(
+        (t.key === 'vote' && needsVote) || (t.key === 'pick' && needsPick) ? '<span class="dot" aria-hidden="true"></span><span class="sr-only"> — action needed</span>' : ''
       )}</button>`
     )
     .join('');
@@ -338,13 +350,13 @@ function pickRow(p, opts = {}) {
   const isBozo = opts.bozoUserId === p.user_id;
   if (p.hidden) {
     return html`<div class="pickrow hiddenpick">
-      <span class="av">${p.avatar}</span>
+      <span class="av" aria-hidden="true">${p.avatar}</span>
       <div class="who"><b>${p.display_name}</b><div class="bet">Locked in · hidden until kickoff</div></div>
       <div class="num"><span class="badge">In</span></div>
     </div>`;
   }
   return html`<div class="pickrow ${isMe ? 'mine' : ''} ${isBozo ? 'is-bozo' : ''}">
-    <span class="av">${p.avatar}</span>
+    <span class="av" aria-hidden="true">${p.avatar}</span>
     <div class="who">
       <b>${p.display_name}${raw(isMe ? ' <span class="badge blue">You</span>' : '')}${raw(
         isBozo ? ' <span class="badge loss">Bozo</span>' : ''
@@ -354,7 +366,7 @@ function pickRow(p, opts = {}) {
       )}</div>
     </div>
     <div class="num">
-      <div class="big">${oddsStr(p.price)}</div>
+      <div class="big" aria-hidden="true">${oddsStr(p.price)}</div>
       <div class="tiny faint">${raw(
         p.actual_value !== null && p.actual_value !== undefined
           ? `${RESULT_ICON[p.result] || ''} actual ${esc(p.actual_value)}`
@@ -513,7 +525,7 @@ function viewWeek() {
         ${raw(S.user.is_admin ? '<button class="btn sm primary" id="sendSummons">Send the summons</button>' : '')}
         ${raw(
           S.user.is_admin
-            ? `<button class="btn sm ghost" id="togglePaid">${bozo.paid ? ' Paid' : ' Mark paid'}</button>`
+            ? `<button class="btn sm ghost" id="togglePaid">${bozo.paid ? 'Paid' : 'Mark paid'}</button>`
             : bozo.paid
             ? '<span class="badge win">Paid up</span>'
             : ''
@@ -564,23 +576,15 @@ function viewWeek() {
   if (w.status === 'open' && mine) {
     parts.push(html`<div class="card">
       <div class="card-head"><h2>Your pick</h2><div class="spacer"></div></div>
-      ${raw(
-        mine
-          ? html`<div class="pickrow mine">
-                <span class="av">${mine.avatar}</span>
-                <div class="who"><b>Locked in</b><div class="bet">${describePick(mine)}</div></div>
-                <div class="num"><div class="big">${oddsStr(mine.price)}</div></div>
-              </div>
-              <div class="row" style="margin-top:12px">
-                <a class="btn sm" href="#pick">Change it</a>
-                <button class="btn sm danger" id="deletePick">Delete</button>
-              </div>`
-          : html`<div class="empty" style="padding:26px">
-                <div class="big">🎯</div>
-                <p class="muted">You have not made a pick yet. The clock is running.</p>
-                <a class="btn primary" href="#pick">Make your pick</a>
-              </div>`
-      )}
+      <div class="pickrow mine">
+        <span class="av" aria-hidden="true">${mine.avatar}</span>
+        <div class="who"><b>Locked in</b><div class="bet">${describePick(mine)}</div></div>
+        <div class="num"><div class="big" aria-hidden="true">${oddsStr(mine.price)}</div></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <a class="btn sm" href="#pick">Change it</a>
+        <button class="btn sm danger" id="deletePick">Delete</button>
+      </div>
     </div>`);
   }
 
@@ -590,13 +594,12 @@ function viewWeek() {
   if (!boardIsNoise) parts.push(html`<div class="card">
     <div class="card-head">
       <h2>The board</h2>
-      <span class="badge">${picks.length} / ${S.users.length} in</span>
       <div class="spacer"></div>
     </div>
     ${raw(
       picks.length
         ? picks.map((p) => pickRow(p, { bozoUserId: bozo?.user_id })).join('')
-        : '<div class="empty"><div class="big">🦗</div><p>Nobody has picked yet.</p></div>'
+        : '<div class="empty"><div class="big" aria-hidden="true">🦗</div><p>Nobody has picked yet.</p></div>'
     )}
   </div>`);
 
@@ -608,11 +611,18 @@ function viewWeek() {
         ${raw(
           S.week.awards
             .map((a) => {
+              // userById only sees active members, so a superlative won by
+              // someone since deactivated rendered with a blank name.
               const u = userById(a.user_id);
+              const who = u
+                ? `${esc(u.avatar)} ${esc(u.display_name)}`
+                : a.display_name
+                ? `${esc(a.avatar || '🤡')} ${esc(a.display_name)} <span class="faint">(former member)</span>`
+                : 'a former member';
               return html`<div class="card tight" style="margin:0">
                 <div style="font-size:26px">${a.emoji}</div>
                 <b style="font-size:13.5px">${a.title}</b>
-                <div class="tiny muted">${raw(u ? `${esc(u.avatar)} ${esc(u.display_name)}` : '')}</div>
+                <div class="tiny muted">${raw(who)}</div>
                 <div class="tiny faint">${a.detail}</div>
               </div>`;
             })
@@ -739,7 +749,7 @@ function wireWeek() {
       if (!mine || !confirm('Delete your pick for this week?')) return;
       try {
         S.week = await api(`/api/picks/${mine.id}`, { method: 'DELETE' });
-        toast('Pick deleted.', 'ok');
+        toast("Gone. Clock's still running.", 'ok');
         render();
       } catch (err) {
         toast(err.message, 'err');
@@ -773,8 +783,16 @@ function openSummonsModal() {
       <select id="audience"><option value="bozo">Just the bozo</option><option value="everyone">The whole group</option></select>
     </label>
     <div class="row" style="margin-top:16px">
-      <button class="btn primary" id="doSend">Send it</button>
-      <button class="btn ghost" id="cancelSend">Cancel</button>
+      <button class="btn primary" id="doSend" ${raw(
+        S.channels?.email.configured || S.channels?.sms.configured
+          ? ''
+          : 'disabled'
+      )}>${raw(
+        S.channels?.email.configured || S.channels?.sms.configured
+          ? 'Send it'
+          : 'Nothing is set up to send with'
+      )}</button>
+      <button class="btn ghost" id="cancelSend">Never mind</button>
     </div>
     <div id="sendResult" class="tiny" style="margin-top:12px"></div>
   `);
@@ -822,7 +840,7 @@ function viewPick() {
   const w = S.week.week;
   if (w.status !== 'open' && !S.user.is_admin) {
     return html`<div class="card"><div class="empty">
-      <div class="big">🔒</div><h2>Picks are locked</h2>
+      <div class="big" aria-hidden="true">🔒</div><h2>Picks are locked</h2>
       <p class="muted">Week ${w.week_number} is ${w.status}. Nothing to do here but wait.</p>
       <a class="btn" href="#week">Back to the board</a>
     </div></div>`;
@@ -852,20 +870,25 @@ function viewPick() {
         ${raw(S.user.is_admin ? quotaBar() : '')}
         <button class="btn sm ghost" id="refreshEvents" title="Reload the game list (free — costs no credits)">↻ Refresh</button>
       </div>
-      ${raw(S.user.is_admin ? '<p class="tiny faint" style="margin-top:-6px">Browsing games is free. Loading props costs credits.</p>' : '')}
+      ${raw(S.user.is_admin ? '<p class="hint">Browsing games is free. Loading props costs credits.</p>' : '')}
       ${raw(slateBar())}
       <div id="eventList" class="grid three">${raw(eventListBody())}</div>
     </div>
 
     ${raw(S.selectedEvent || S.propSource === 'slate' || S.slateLoading ? propBoard() : '')}
 
-    <div class="card">
-      <div class="card-head"><h2>${raw(
-        S.selectedProp !== null ? '4' : S.selectedEvent || S.propSource === 'slate' ? '3' : '2'
-      )} · Or enter it by hand</h2></div>
-      <p class="tiny faint" style="margin-top:-6px">If the book you use has a number the API doesn't, type it in.</p>
-      ${raw(manualForm())}
-    </div>
+    <details class="card disclosure" ${raw(
+      // With no board there is nothing else to pick from, so don't hide the
+      // only way in. Three empty states point people here.
+      S.eventsState === 'error' || !S.events.length ? 'open' : ''
+    )}>
+      <summary>
+        <span><b>Or enter it by hand</b>
+          <span class="tiny faint">If your book has a number the API doesn't, type it in.</span>
+        </span>
+      </summary>
+      <div class="disclosure-body">${raw(manualForm())}</div>
+    </details>
   `;
 }
 
@@ -898,7 +921,7 @@ function slateBar() {
             : 'Type a player name instead of hunting through matchups.'
         )}</div>
       </div>
-      <button class="btn sm ${raw(S.propSource === 'slate' ? '' : 'primary')}" id="loadSlate">${raw(S.propSource === 'slate' ? '↻ Reload all games' : ' Load all games')}
+      <button class="btn sm ${raw(S.propSource === 'slate' ? '' : 'primary')}" id="loadSlate">${raw(S.propSource === 'slate' ? '↻ Reload all games' : '↓ Load all games')}
       </button>
     </div>
   </div>`;
@@ -910,7 +933,7 @@ function eventListBody() {
   }
   if (S.eventsState === 'error') {
     return html`<div class="empty" style="grid-column:1/-1">
-      <div class="big">📡</div>
+      <div class="big" aria-hidden="true">📡</div>
       <p class="muted">Could not reach the Odds API.</p>
       <p class="tiny faint">${S.eventsError}</p>
       <button class="btn sm" id="retryEvents">Try again</button>
@@ -918,8 +941,24 @@ function eventListBody() {
     </div>`;
   }
   if (!S.events.length) {
+    // An empty list has two very different causes. The endpoint returns 200
+    // with an `error` when there is no API key, so blaming the offseason in
+    // September sends the one person who can fix it looking the wrong way.
+    if (S.eventsError) {
+      return html`<div class="empty" style="grid-column:1/-1">
+        <div class="big" aria-hidden="true">🔌</div>
+        <p class="muted">No live lines right now.</p>
+        <p class="tiny faint">${S.eventsError}</p>
+        ${raw(
+          S.user.is_admin
+            ? '<a class="btn sm" href="#admin">Open Commissioner settings</a>'
+            : '<p class="tiny faint">Ask the commissioner to check the Odds API key.</p>'
+        )}
+        <p class="tiny faint" style="margin-top:10px">You can still enter a pick by hand below.</p>
+      </div>`;
+    }
     return html`<div class="empty" style="grid-column:1/-1">
-      <div class="big">🏝️</div>
+      <div class="big" aria-hidden="true">🏝️</div>
       <p class="muted">No upcoming NFL games on the board.</p>
       <p class="tiny faint">Offseason, or the slate hasn't posted yet. Enter a pick by hand below.</p>
     </div>`;
@@ -1012,12 +1051,12 @@ function propBoard() {
       ${raw(!slate && S.user.is_admin ? '<button class="btn sm ghost" id="forceProps" title="Bypass the cache — costs credits">Refresh</button>' : '')}
     </div>
 
-    <div class="pill-row" role="tablist" aria-label="Prop category">
+    <div class="pill-row" role="group" aria-label="Prop category">
       ${raw(
         present
           .map(
-            (g) => html`<button class="pill ${g === category ? 'active' : ''}" data-cat="${g}" role="tab"
-              aria-selected="${g === category ? 'true' : 'false'}">${g}</button>`
+            (g) => html`<button class="pill ${g === category ? 'active' : ''}" data-cat="${g}"
+              aria-pressed="${g === category ? 'true' : 'false'}">${g}</button>`
           )
           .join('')
       )}
@@ -1025,23 +1064,23 @@ function propBoard() {
 
     <div class="board-controls">
       <div class="seg" role="group" aria-label="Group by">
-        <button class="seg-btn ${groupBy === 'game' ? 'active' : ''}" data-group="game">By game</button>
+        <button class="seg-btn ${groupBy === 'game' ? 'active' : ''}" data-group="game" aria-pressed="${groupBy === 'game' ? 'true' : 'false'}">By game</button>
         ${raw(
           canGroupByTeam
-            ? html`<button class="seg-btn ${groupBy === 'team' ? 'active' : ''}" data-group="team">By team</button>`
+            ? html`<button class="seg-btn ${groupBy === 'team' ? 'active' : ''}" data-group="team" aria-pressed="${groupBy === 'team' ? 'true' : 'false'}">By team</button>`
             : ''
         )}
-        <button class="seg-btn ${groupBy === 'player' ? 'active' : ''}" data-group="player">A–Z</button>
+        <button class="seg-btn ${groupBy === 'player' ? 'active' : ''}" data-group="player" aria-pressed="${groupBy === 'player' ? 'true' : 'false'}">A–Z</button>
       </div>
       ${raw(
         hasOU
           ? html`<div class="seg" role="group" aria-label="Side">
-              <button class="seg-btn ${S.propSide === 'Over' ? 'active' : ''}" data-side="Over">Over</button>
-              <button class="seg-btn ${S.propSide === 'Under' ? 'active' : ''}" data-side="Under">Under</button>
+              <button class="seg-btn ${S.propSide === 'Over' ? 'active' : ''}" data-side="Over" aria-pressed="${S.propSide === 'Over' ? 'true' : 'false'}">Over</button>
+              <button class="seg-btn ${S.propSide === 'Under' ? 'active' : ''}" data-side="Under" aria-pressed="${S.propSide === 'Under' ? 'true' : 'false'}">Under</button>
             </div>`
           : ''
       )}
-      <input id="propFilter" class="board-search" placeholder="Search players" value="${S.propFilter}">
+      <input id="propFilter" aria-label="Search players" class="board-search" placeholder="Search players" value="${S.propFilter}">
     </div>
 
     ${raw(
@@ -1150,7 +1189,7 @@ function propCell(sides, column) {
     column.type === 'yesno'
       ? sides.Yes || sides.No || Object.values(sides)[0]
       : sides[S.propSide] || sides.Over || sides.Under;
-  if (!pick) return '<div class="board-cell empty-cell">—</div>';
+  if (!pick) return '<div class="board-cell empty-cell" aria-hidden="true">—</div>';
 
   const idx = S.props.props.indexOf(pick);
   const selected = S.selectedProp === idx;
@@ -1189,7 +1228,7 @@ function confirmPanel() {
           )}</div>
         </div>
         <div style="text-align:right">
-          <div class="mono" style="font-size:22px;font-weight:900">${raw(
+          <div class="mono" style="font-size:22px;font-weight:600">${raw(
             finalPrice === null ? '—' : oddsStr(finalPrice)
           )}</div>
           <div class="tiny faint">${raw(
@@ -1204,7 +1243,7 @@ function confirmPanel() {
               ${raw(
                 sides
                   .map(
-                    (sd) => html`<button class="seg-btn ${sd === p.selection ? 'active' : ''}" data-flip="${sd}">${sd}</button>`
+                    (sd) => html`<button class="seg-btn ${sd === p.selection ? 'active' : ''}" data-flip="${sd}" aria-pressed="${sd === p.selection ? 'true' : 'false'}">${sd}</button>`
                   )
                   .join('')
               )}
@@ -1217,12 +1256,15 @@ function confirmPanel() {
           ? html`
             <div class="row" style="justify-content:space-between;margin-bottom:2px">
               <span class="eyebrow">Move the line</span>
-              <span class="mono" style="font-size:17px;font-weight:900">${line}${raw(
+              <span class="mono" style="font-size:17px;font-weight:600">${line}${raw(
                 S.curve.unit ? ` <span class="faint tiny">${esc(S.curve.unit)}</span>` : ''
               )}</span>
             </div>
             <input type="range" id="lineSlider" min="0" max="${raw(S.curve.ladder.length - 1)}"
-                   step="1" value="${raw(S.curveIndex)}" style="width:100%;padding:0">
+                   step="1" value="${raw(S.curveIndex)}" style="width:100%;padding:0"
+                   aria-label="Move the line" aria-valuetext="${raw(esc(line))}${raw(
+                     S.curve.unit ? ' ' + esc(S.curve.unit) : ''
+                   )}">
             <div class="row tiny faint" style="justify-content:space-between;margin-top:2px">
               <span>${raw(S.curve.ladder[0].line)}</span>
               <span>${raw(slid ? `posted line ${esc(S.curve.posted_line)}` : 'posted line')}</span>
@@ -1236,12 +1278,19 @@ function confirmPanel() {
                   </p>`
                 : ''
             )}
-            <div class="row" style="margin-top:10px">
+`
+          : ''
+      )}
+
+      ${raw(
+        S.curve || modelPrice === null
+          ? html`<div class="row" style="margin-top:10px">
               <label class="tiny faint" style="flex:1;min-width:150px">
-                Real price from your book (optional)
+                ${raw(modelPrice === null ? 'Price from your book' : 'Real price from your book (optional)')}
                 <input id="priceOverride" type="number" step="5" placeholder="${raw(
                   modelPrice === null ? '-110' : esc(modelPrice)
-                )}" value="${S.priceOverride}" style="margin-top:4px">
+                )}" value="${S.priceOverride}" style="margin-top:4px"
+                  aria-label="Price from your book, American odds">
               </label>
             </div>`
           : ''
@@ -1259,10 +1308,6 @@ function confirmPanel() {
   </div>`;
 }
 
-function describeProp(p) {
-  const line = p.line === null || p.line === undefined ? '' : ' ' + p.line;
-  return `${p.player} ${p.selection}${line} (${oddsStr(p.price)})`;
-}
 
 /** The market currently chosen in the manual form (or the first in the catalog). */
 function currentManualMarket() {
@@ -1278,11 +1323,21 @@ function sideOptionsFor(meta) {
 function manualLinePlaceholder() {
   const meta = currentManualMarket();
   if (!meta) return '74.5';
-  if (meta.type === 'yesno') return 'no line for this bet';
+  if (meta.type === 'yesno') return 'no line on this one';
   return meta.plausible ? String(meta.plausible[0] + (meta.plausible[1] - meta.plausible[0]) / 3).slice(0, 5) : '74.5';
 }
 
 function manualForm() {
+  // Without the catalog the market <select> renders empty, selectedIndex is -1,
+  // and the submit handler throws on options[-1]. Three empty states point
+  // people here, so it has to say something instead of dying quietly.
+  if (!S.marketCatalog || !S.marketCatalog.length) {
+    return html`<div class="empty">
+      <p class="muted">Manual entry is unavailable.</p>
+      <p class="tiny faint">The market list didn't load. Reload the page and try again.</p>
+      <button class="btn sm" onclick="window.location.reload()">Reload</button>
+    </div>`;
+  }
   return html`<div class="grid two">
     <label class="field"><span>Player</span><input id="mPlayer" placeholder="Ja'Marr Chase"></label>
     <label class="field"><span>Market</span>
@@ -1316,7 +1371,6 @@ async function loadEvents(force = false, { rerender = false } = {}) {
   try {
     const data = await api('/api/odds/events' + (force ? '?force=1' : ''));
     S.events = data.events || [];
-    S.eventsMeta = data;
     S.quota = data.quota || S.quota;
     S.eventsState = 'ready';
     S.slateEstimate = null;
@@ -1436,7 +1490,7 @@ async function loadSlate(force = false) {
         : `${data.props.length} props across ${data.games.length} games — ${data.cost} credits.`,
       'ok'
     );
-    if (data.failures?.length) toast(`${data.failures.length} game(s) failed to load.`, 'err', 6000);
+    if (data.failures?.length) toast(`${data.failures.length} game${data.failures.length === 1 ? '' : 's'} failed to load.`, 'err', 6000);
   } catch (err) {
     toast(err.message, 'err', 8000);
   } finally {
@@ -1728,10 +1782,14 @@ function viewVote() {
         <div class="spacer"></div>
         <span class="badge">${totalVotes} / ${S.users.length} voted</span>
       </div>
-      <p class="tiny faint" style="margin-top:-6px">
-        The <b>Bozo Index</b> ranks each loss by how badly the number was missed (65%) and how safe the bet was
-        supposed to be (35%). It is a suggestion. You are the jury.
-      </p>
+      ${raw(
+        cands.length
+          ? html`<p class="hint">
+              The <b>Bozo Index</b> ranks each loss by how badly the number was missed (65%) and how safe the pick was
+              supposed to be (35%). It is a suggestion. You are the jury.
+            </p>`
+          : ''
+      )}
 
       ${raw(
         cands.length
@@ -1740,7 +1798,7 @@ function viewVote() {
                 .map(
                   (c) => html`<button class="votecard ${myVote?.nominee_id === c.user_id ? 'voted' : ''}" data-vote="${c.user_id}">${raw(c.votes ? `<span class="votecount">${esc(c.votes)}</span>` : '')}
                     <div class="head">
-                      <span class="av">${c.avatar}</span>
+                      <span class="av" aria-hidden="true">${c.avatar}</span>
                       <div><b>${c.display_name}</b>
                         <div class="tiny faint">${raw(myVote?.nominee_id === c.user_id ? 'your vote' : '&nbsp;')}</div>
                       </div>
@@ -1750,7 +1808,7 @@ function viewVote() {
                     )} — ${c.market_label} <span class="mono">${oddsStr(c.price)}</span></div>
                     <div class="row tiny" style="justify-content:space-between">
                       <span class="muted">${outcomeText(c)}</span>
-                      <span class="mono" style="font-weight:900">${c.bozo_score}</span>
+                      <span class="mono" style="font-weight:600">${c.bozo_score}</span>
                     </div>
                     <div class="meter"><i style="width:${raw((((c.bozo_score || 0) / maxScore) * 100).toFixed(1))}%"></i></div>
                     <div class="row tiny faint" style="justify-content:space-between">
@@ -1761,14 +1819,17 @@ function viewVote() {
                 )
                 .join('')
             )}</div>`
-          : '<div class="empty"><div class="big">😇</div><h2>Nobody lost.</h2><p class="muted">A perfect week. Deeply suspicious.</p></div>'
+          : html`<div class="empty"><div class="big" aria-hidden="true">😇</div>
+              <h2>Nobody lost.</h2>
+              <p class="muted">${S.week.perfect_week || 'A perfect week. Deeply suspicious.'}</p>
+            </div>`
       )}
 
       ${raw(
         cands.length
           ? html`<hr class="sep">
             <div class="row">
-              <span class="tiny faint">Prefer to nominate someone who isn't listed?</span>
+              <span class="tiny faint">Nominate someone else.</span>
               <select id="voteOther" style="width:auto;min-width:190px">
                 <option value="">Pick a member…</option>
                 ${raw(
@@ -1793,7 +1854,7 @@ function viewVote() {
               S.week.votes
                 .map(
                   (v) => html`<div class="pickrow">
-                    <span class="av">${v.voter_avatar}</span>
+                    <span class="av" aria-hidden="true">${v.voter_avatar}</span>
                     <div class="who"><b>${v.voter_name} → ${v.nominee_name}</b>
                       ${raw(v.reason ? `<div class="bet">“${esc(v.reason)}”</div>` : '')}
                     </div>
@@ -1801,6 +1862,18 @@ function viewVote() {
                 )
                 .join('')
             )}
+          </div>`
+        : ''
+    )}
+
+    ${raw(
+      S.user.is_admin && !cands.length && S.week.week.status !== 'final'
+        ? html`<div class="card">
+            <div class="card-head"><h2>Commissioner</h2></div>
+            <p class="tiny muted">No bozo this week. Close it out and nobody pays.</p>
+            <div class="row">
+              <button class="btn" id="closePerfect">Close the week — nobody lost</button>
+            </div>
           </div>`
         : ''
     )}
@@ -1847,6 +1920,23 @@ function wireVote() {
     });
   }
 
+  const closePerfect = $('#closePerfect');
+  if (closePerfect) {
+    closePerfect.addEventListener('click', async () => {
+      closePerfect.disabled = true;
+      try {
+        await api(`/api/weeks/${S.week.week.id}`, { method: 'PATCH', body: { status: 'final' } });
+        await loadState();
+        toast('Week closed. No bozo, no bill.', 'ok');
+        window.location.hash = 'week';
+        render();
+      } catch (err) {
+        toast(err.message, 'err', 6000);
+        closePerfect.disabled = false;
+      }
+    });
+  }
+
   const crown = $('#crownBozo');
   if (crown) {
     crown.addEventListener('click', async () => {
@@ -1887,7 +1977,7 @@ function castVote(nomineeId) {
         body: { nominee_id: nomineeId, reason: $('#voteReason', m.el).value.trim() },
       });
       m.close();
-      toast('Vote cast.', 'ok');
+      toast('Noted. No takebacks.', 'ok');
       render();
     } catch (err) {
       toast(err.message, 'err');
@@ -1920,7 +2010,7 @@ function viewShame() {
   const g = group || { season: {}, all_time: {} };
 
   return html`
-    <div class="card group-card">
+    <div class="card">
       <div class="card-head">
         <h2>${S.settings.group_name || 'The group'}</h2>
         <div class="spacer"></div>
@@ -1959,7 +2049,7 @@ function viewShame() {
             const w = Math.round((at.win_pct || 0) * 100);
             return html`<div class="acc-row ${a.user.id === S.user.id ? 'me' : ''} ${a.qualified ? '' : 'unranked'}">
               <div class="acc-rank">${raw(a.qualified ? '#' + (i + 1) : '—')}</div>
-              <span class="av">${a.user.avatar}</span>
+              <span class="av" aria-hidden="true">${a.user.avatar}</span>
               <div class="acc-who">
                 <b>${a.user.display_name}</b>
                 <div class="tiny faint">${season.year}: ${se.wins}-${se.losses}${raw(
@@ -1996,10 +2086,10 @@ function viewShame() {
                 <td class="rank">${raw(i === 0 && r.bozos_season > 0 ? '🤡' : '#' + (i + 1))}</td>
                 <td>
                   <div class="person">
-                    <span class="av">${r.user.avatar}</span>
+                    <span class="av" aria-hidden="true">${r.user.avatar}</span>
                     <div>
                       <b>${r.user.display_name}</b>
-                      <small>${raw('🤡'.repeat(Math.min(r.bozos_all_time, 10)) || '—')}</small>
+                      <small>${raw('🤡'.repeat(Math.min(r.bozos_all_time, 5)) + (r.bozos_all_time > 5 ? ` +${r.bozos_all_time - 5}` : '') || '—')}</small>
                     </div>
                   </div>
                 </td>
@@ -2029,7 +2119,7 @@ function viewShame() {
               .slice(0, 8)
               .map(
                 (r) => html`<div class="pickrow">
-                  <span class="av">${r.user.avatar}</span>
+                  <span class="av" aria-hidden="true">${r.user.avatar}</span>
                   <div class="who">
                     <b>${r.user.display_name} <span class="faint tiny">· ${r.worst_pick.year} Wk ${r.worst_pick.week_number}</span></b>
                     <div class="bet">${r.worst_pick.player} ${r.worst_pick.selection}${raw(
@@ -2037,7 +2127,7 @@ function viewShame() {
                     )} — ${outcomeText(r.worst_pick)}</div>
                   </div>
                   <div class="num">
-                    <div class="big">${r.worst_pick.bozo_score}</div>
+                    <div class="big" aria-hidden="true">${r.worst_pick.bozo_score}</div>
                     <div class="tiny faint">missed ${r.worst_pick.miss_percent}%</div>
                   </div>
                 </div>`
@@ -2102,8 +2192,9 @@ function viewHistory() {
     ${raw(
       S.historyRows
         .map(
-          (w) => html`<div class="pickrow" style="cursor:pointer" data-week="${w.id}">
-            <span class="av">${w.bozo_avatar || '⏳'}</span>
+          (w) => html`<button type="button" class="pickrow rowbtn" data-week="${w.id}"
+            aria-label="Open ${w.year} week ${w.week_number}${raw(w.bozo_name ? `, bozo ${esc(w.bozo_name)}` : ', in progress')}">
+            <span class="av" aria-hidden="true">${w.bozo_avatar || '⏳'}</span>
             <div class="who">
               <b>${w.year} · Week ${w.week_number} ${raw(
                 w.bozo_name ? `— <span class="text-danger">${esc(w.bozo_name)}</span>` : '<span class="faint">in progress</span>'
@@ -2114,7 +2205,7 @@ function viewHistory() {
               <div class="tiny faint">${money(w.stake_cents)}</div>
               ${raw(w.paid ? '<span class="badge win">paid</span>' : w.bozo_name ? '<span class="badge loss">owes</span>' : '')}
             </div>
-          </div>`
+          </button>`
         )
         .join('')
     )}
@@ -2158,8 +2249,14 @@ function showWeekModal(detail) {
           </div>`
         : ''
     )}
-    ${raw(detail.picks.map((p) => pickRow(p, { bozoUserId: detail.bozo?.user_id })).join(''))}
+    ${raw(
+      detail.picks.length
+        ? detail.picks.map((p) => pickRow(p, { bozoUserId: detail.bozo?.user_id })).join('')
+        : '<p class="muted tiny">Nobody picked this week.</p>'
+    )}
     ${raw(detail.parlay ? ticket(detail.parlay, w) : '')}
+    <div class="row" style="margin-top:14px"><div class="spacer"></div>
+      <button class="btn ghost" data-close-modal>Done</button></div>
   `);
 }
 
@@ -2168,7 +2265,12 @@ function showWeekModal(detail) {
    ============================================================ */
 
 function viewAdmin() {
-  if (!S.user.is_admin) return html`<div class="card"><div class="empty"><div class="big">🚫</div><p>Commissioners only.</p></div></div>`;
+  if (!S.user.is_admin)
+    return html`<div class="card"><div class="empty">
+      <div class="big" aria-hidden="true">🚫</div>
+      <p class="muted">Commissioners only.</p>
+      <a class="btn" href="#week">Back to this week</a>
+    </div></div>`;
   if (S.viewError.admin) return loadFailed('admin', S.viewError.admin);
   if (!S.adminData) {
     loadAdmin();
@@ -2194,7 +2296,7 @@ function viewAdmin() {
                   ? '<span class="tiny faint">Enter stat lines below to open voting</span>'
                   : w.status === 'graded'
                   ? '<a class="btn sm primary" href="#vote">Go to voting</a>'
-                  : '<button class="btn sm ghost" data-status="graded">︎ Reopen voting</button>'
+                  : '<button class="btn sm ghost" data-status="graded">Reopen voting</button>'
               )}
             </div>
             <div class="grid three">
@@ -2205,7 +2307,10 @@ function viewAdmin() {
               <label class="field"><span>Label</span><input id="wLabel" value="${w.label || ''}" placeholder="Divisional round"></label>
             </div>
             <button class="btn sm" id="saveWeek">Save week settings</button>`
-          : '<p class="muted tiny">No week open.</p>'
+          : html`<div class="empty">
+              <p class="muted">No week is open yet</p>
+              <button class="btn primary" id="openFirstWeek">Open week 1</button>
+            </div>`
       )}
       <hr class="sep">
       <div class="row">
@@ -2223,7 +2328,7 @@ function viewAdmin() {
         users
           .map(
             (u) => html`<div class="pickrow ${u.is_active ? '' : 'hiddenpick'}">
-              <span class="av">${u.avatar}</span>
+              <span class="av" aria-hidden="true">${u.avatar}</span>
               <div class="who">
                 <b>${u.display_name} <span class="faint tiny">@${u.username}</span>${raw(
                   u.is_admin ? ' <span class="badge blue">commissioner</span>' : ''
@@ -2255,25 +2360,31 @@ function viewAdmin() {
           )}
           <label class="field"><span>Monthly credit cap</span>
             <input id="sCap" type="number" min="0" value="${settings.monthly_credit_cap}"></label>
-          <p class="tiny faint" style="margin-top:-6px">The app refuses paid calls past this. Free tier is 500/month; the paid tier is 20,000. Keep the cap a little under your real plan.</p>
+          <p class="hint">Nothing paid happens past this number. Free plans get 500 a month. Leave a little headroom.</p>
           <label class="field"><span>Props cache (minutes)</span>
             <input id="sCache" type="number" min="1" value="${settings.props_cache_minutes}"></label>
-          <p class="tiny faint" style="margin-top:-6px">Longer cache = fewer credits, staler lines. One fetch serves everybody.</p>
+          <p class="hint">Longer cache = fewer credits, staler lines. One fetch serves everybody.</p>
         </div>
         <div>
           <span class="eyebrow">Prop markets to load</span>
-          <p class="tiny faint">Each market costs 1 credit per game loaded. Loading all ${raw(
-        S.events?.length || 16
-      )} games costs that many × the number of games.</p>
+          <p class="hint">${raw(
+            (() => {
+              const games = S.events?.length || 16;
+              const picked = settings.odds_markets.split(',').filter(Boolean).length;
+              return `One credit per market, per game. ${picked} market${
+                picked === 1 ? '' : 's'
+              } across ${games} games is ${picked * games} credits.`;
+            })()
+          )}</p>
           <div style="max-height:230px;overflow-y:auto;padding-right:6px;margin-top:8px">
             ${raw(
               (S.marketCatalog || [])
                 .map(
                   (m) => html`<div class="checkline">
-                    <input type="checkbox" class="mkt" value="${m.key}" ${raw(
+                    <input type="checkbox" class="mkt" id="mkt-${m.key}" value="${m.key}" ${raw(
                     settings.odds_markets.split(',').includes(m.key) ? 'checked' : ''
                   )}>
-                    <label>${m.label} <span class="faint tiny">${m.group}</span></label>
+                    <label for="mkt-${m.key}">${m.label} <span class="faint tiny">${m.group}</span></label>
                   </div>`
                 )
                 .join('')
@@ -2325,10 +2436,10 @@ function viewAdmin() {
       <div class="card-head"><h2>Notifications</h2></div>
       <p class="tiny muted">Email: <b>${raw(S.channels.email.configured ? 'ready' : 'not configured')}</b> ·
          SMS: <b>${raw(S.channels.sms.configured ? 'ready' : 'not configured')}</b></p>
-      <p class="tiny faint">Configured with environment variables (SMTP_* and TWILIO_*). See the README.</p>
+      <p class="tiny faint">Set up in the server's environment. If either says “not configured”, that's a hosting job, not a settings job.</p>
       <div class="row">
-        <input id="testTarget" placeholder="you@example.com or +15551234567" style="max-width:280px">
-        <select id="testChannel" style="width:auto"><option value="email">Email</option><option value="sms">SMS</option></select>
+        <input id="testTarget" aria-label="Send the test to this address or number" placeholder="you@example.com or +15551234567" style="max-width:280px">
+        <select id="testChannel" aria-label="Send by" style="width:auto"><option value="email">Email</option><option value="sms">SMS</option></select>
         <button class="btn sm" id="sendTest">Send test</button>
       </div>
     </div>
@@ -2363,9 +2474,9 @@ function schedulePanel() {
       <input type="checkbox" id="schedOn" ${raw(sc.enabled ? 'checked' : '')}>
       <label for="schedOn"><b>Send the weekly digests automatically</b></label>
     </div>
-    <p class="tiny faint" style="margin-top:-4px">
-      Runs inside the app, so it needs the site to stay up. A missed slot (restart, sleeping host)
-      is caught up automatically within 15 minutes.
+    <p class="hint">
+      Runs inside the app, so the site has to be awake. If it was asleep when a digest was due,
+      that digest goes out within 15 minutes of it waking up.
     </p>
 
     ${raw(
@@ -2440,14 +2551,20 @@ function schedulePanel() {
 
 function gradePanel() {
   const picks = S.week.picks;
+  if (!picks.length) {
+    return html`<div class="card"><div class="empty">
+      <p class="muted">Nobody picked this week.</p>
+      <p class="tiny faint">Nothing to grade.</p>
+    </div></div>`;
+  }
   return html`<div class="card">
     <div class="card-head"><h2>Enter the stat lines</h2><div class="spacer"></div>
-      <span class="tiny faint">Results are computed from the numbers — no manual W/L</span></div>
+      <span class="tiny faint">Type what they actually got. The app does the rest.</span></div>
     ${raw(
       picks
         .map(
           (p) => html`<div class="pickrow">
-            <span class="av">${p.avatar}</span>
+            <span class="av" aria-hidden="true">${p.avatar}</span>
             <div class="who">
               <b>${p.display_name}</b>
               <div class="bet">${describePick(p)} <span class="mono">${oddsStr(p.price)}</span></div>
@@ -2455,6 +2572,7 @@ function gradePanel() {
             <div class="num" style="display:flex;gap:6px;align-items:center">
               <input class="statline" data-pick="${p.id}" type="number" step="any"
                      value="${raw(p.actual_value ?? '')}" placeholder="actual"
+                     aria-label="${p.display_name} — what ${p.player} actually got, ${p.market_label}"
                      style="width:96px;text-align:right">
               <span class="badge ${p.result}">${raw(RESULT_ICON[p.result] || '')} ${p.result}</span>
             </div>
@@ -2463,7 +2581,7 @@ function gradePanel() {
         .join('')
     )}
     <div class="row" style="margin-top:12px">
-      <button class="btn primary" id="saveGrades">Save & compute results</button>
+      <button class="btn primary" id="saveGrades">Grade the week</button>
       <span class="tiny faint">Leave a box blank to keep it pending. All settled → voting opens.</span>
     </div>
   </div>`;
@@ -2520,7 +2638,12 @@ function wireAdmin() {
     btn.addEventListener('click', async () => {
       try {
         S.week = await api(`/api/weeks/${S.week.week.id}`, { method: 'PATCH', body: { status: btn.dataset.status } });
-        toast(`Week is now ${btn.dataset.status}.`, 'ok');
+        toast(
+          { locked: 'Picks are locked.', graded: 'Voting is open.', final: 'Week closed.', open: 'Picks are open again.' }[
+            btn.dataset.status
+          ] || 'Week updated.',
+          'ok'
+        );
         S.adminData = null;
         render();
       } catch (err) {
@@ -2555,10 +2678,10 @@ function wireAdmin() {
     newWeek.addEventListener('click', async () => {
       try {
         await api('/api/weeks', { method: 'POST', body: {} });
-        toast('New week opened.', 'ok');
         S.adminData = null;
         S.historyRows = null;
         await loadState();
+        toast(`Week ${S.week?.week?.week_number ?? ''} is live.`.replace('  ', ' '), 'ok');
         window.location.hash = 'week';
         render();
       } catch (err) {
@@ -2578,7 +2701,7 @@ function wireAdmin() {
         const res = await api(`/api/weeks/${S.week.week.id}/grade`, { method: 'POST', body: { results } });
         S.week = res;
         (res.warnings || []).forEach((w) => toast('⚠️ ' + w, 'err', 9000));
-        toast('Results computed.', 'ok');
+        toast('Graded. Voting is open.', 'ok');
         S.leaderboard = null;
         render();
       } catch (err) {
@@ -2660,7 +2783,7 @@ function wireAdmin() {
       try {
         const res = await api('/api/admin/schedule', { method: 'PATCH', body });
         S.schedule = res.status;
-        toast(res.status.enabled ? 'Schedule saved and armed.' : 'Schedule saved (currently off).', 'ok');
+        toast(res.status.enabled ? 'Schedule saved. Digests will go out.' : 'Schedule saved. Nothing sends until you switch it on.', 'ok');
         render();
       } catch (err) {
         toast(err.message, 'err', 7000);
@@ -2679,12 +2802,14 @@ function wireAdmin() {
             <div class="spacer"></div>
             <span class="badge">${res.credits} credits</span></div>
           <pre class="pre">${res.text}</pre>
+          <div class="row" style="margin-top:12px"><div class="spacer"></div>
+            <button class="btn ghost" data-close-modal>Done</button></div>
         `);
       } catch (err) {
         toast(err.message, 'err', 7000);
       } finally {
         btn.disabled = false;
-        btn.textContent = '👁 Preview';
+        btn.textContent = 'Preview';
       }
     })
   );
@@ -2695,7 +2820,9 @@ function wireAdmin() {
       btn.disabled = true;
       try {
         const res = await api(`/api/admin/schedule/run/${btn.dataset.runjob}`, { method: 'POST' });
-        toast(`Sent to ${res.delivered} member(s). ${res.credits} credits used.`, res.delivered ? 'ok' : 'err', 6000);
+        toast(`Sent to ${res.delivered} member${res.delivered === 1 ? '' : 's'}. ${res.credits} credit${
+          res.credits === 1 ? '' : 's'
+        } used.`, res.delivered ? 'ok' : 'err', 6000);
         S.adminData = null;
         render();
       } catch (err) {
@@ -2745,7 +2872,7 @@ function memberModal(user) {
     )}
     <div class="row" style="margin-top:16px">
       <button class="btn primary" id="fSave">${raw(isNew ? 'Create' : 'Save')}</button>
-      <button class="btn ghost" id="fCancel">Cancel</button>
+      <button class="btn ghost" id="fCancel">Never mind</button>
     </div>
   `);
 
@@ -2791,7 +2918,11 @@ function applyTheme(mode) {
   const root = document.documentElement;
   if (mode === 'light' || mode === 'dark') root.dataset.theme = mode;
   else delete root.dataset.theme;               // follow the system
-  $$('.theme-btn').forEach((b) => b.classList.toggle('active', b.dataset.theme === (mode || 'auto')));
+  $$('.theme-btn').forEach((b) => {
+    const on = b.dataset.theme === (mode || 'auto');
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
   try {
     if (mode === 'light' || mode === 'dark') localStorage.setItem('bmb_theme', mode);
     else localStorage.removeItem('bmb_theme');
@@ -2949,11 +3080,37 @@ function render() {
   if (WIRES[S.tab]) WIRES[S.tab]();
 }
 
+function bootFailed(message) {
+  $('#view').innerHTML = html`<div class="card"><div class="empty">
+    <div class="big" aria-hidden="true">📡</div>
+    <h2>Couldn't start</h2>
+    <p class="muted">${message}</p>
+    <button class="btn primary" id="bootRetry">Try again</button>
+  </div></div>`;
+  $('#bootRetry').addEventListener('click', () => {
+    $('#view').innerHTML = '<div class="card"><div class="spinner"></div></div>';
+    boot();
+  });
+  // Keep sign-out reachable even when nothing else loaded.
+  const chip = $('#userChip');
+  if (chip) {
+    chip.hidden = false;
+    $('#logoutBtn').onclick = async () => {
+      try { await api('/api/auth/logout', { method: 'POST' }); } catch {}
+      window.location.href = '/login';
+    };
+  }
+}
+
 async function boot() {
   try {
     await loadState();
   } catch (err) {
-    if (err.message !== 'Signed out.') toast(err.message, 'err');
+    // Signed out redirects itself. Anything else used to leave the bootstrap
+    // spinner turning forever: no tabs, no sign-out, no way back but a reload
+    // that hits the same wall. Draw a real card instead.
+    if (err.message === 'Signed out.') return;
+    bootFailed(err.message);
     return;
   }
 

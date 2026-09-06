@@ -180,6 +180,14 @@ function weekDetail(weekId, viewer) {
 
   const awards = statusRank(week.status) >= statusRank('graded') ? roast.weeklyAwards(decorated) : [];
 
+  // Nobody lost: there is no bozo to crown, so the vote screen needs its own
+  // ending. Without this the week has no way to reach 'final' and the three
+  // hand-written perfect-week lines are unreachable.
+  const perfectWeek =
+    statusRank(week.status) >= statusRank('graded') && !candidates.length && decorated.length
+      ? roast.perfectWeek(`w${week.id}`)
+      : null;
+
   return {
     week: {
       ...week,
@@ -196,6 +204,7 @@ function weekDetail(weekId, viewer) {
     vote_tally: [...tally.entries()].map(([user_id, count]) => ({ user_id, count })),
     my_vote: myVote,
     candidates,
+    perfect_week: perfectWeek,
     bozo: bozo
       ? {
           ...bozo,

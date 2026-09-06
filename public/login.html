@@ -63,7 +63,7 @@
   function apply(mode) {
     var root = document.documentElement;
     if (mode === 'light' || mode === 'dark') root.dataset.theme = mode; else delete root.dataset.theme;
-    document.querySelectorAll('.theme-btn').forEach(function (b) { b.classList.toggle('active', b.dataset.theme === (mode || 'auto')); });
+    document.querySelectorAll('.theme-btn').forEach(function (b) { var on = b.dataset.theme === (mode || 'auto'); b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
     try { if (mode === 'light' || mode === 'dark') localStorage.setItem('bmb_theme', mode); else localStorage.removeItem('bmb_theme'); } catch (e) {}
   }
   var saved = null; try { saved = localStorage.getItem('bmb_theme'); } catch (e) {}

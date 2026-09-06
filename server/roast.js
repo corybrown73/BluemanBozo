@@ -136,7 +136,7 @@ function weeklyAwards(picks) {
   if (wins.length) {
     const longest = wins.reduce((a, b) => (Number(b.price) > Number(a.price) ? b : a));
     if (Number(longest.price) > 0) {
-      awards.push({ key: 'dart', emoji: '🎯', title: 'Dart Throw of the Week', user_id: longest.user_id, detail: `${longest.player} at ${longest.price > 0 ? '+' : ''}${longest.price} cashed` });
+      awards.push({ key: 'dart', emoji: '🎯', title: 'Dart Throw of the Week', user_id: longest.user_id, display_name: longest.display_name, avatar: longest.avatar, detail: `${longest.player} at ${longest.price > 0 ? '+' : ''}${longest.price} cashed` });
     }
   }
 
@@ -144,13 +144,13 @@ function weeklyAwards(picks) {
   if (losses.length) {
     const worst = losses.reduce((a, b) => ((b.miss_percent || 0) > (a.miss_percent || 0) ? b : a));
     if ((worst.miss_percent || 0) > 0) {
-      awards.push({ key: 'airball', emoji: '🧊', title: 'Ice Cold', user_id: worst.user_id, detail: `${worst.player} missed by ${worst.miss_percent}%` });
+      awards.push({ key: 'airball', emoji: '🧊', title: 'Ice Cold', user_id: worst.user_id, display_name: worst.display_name, avatar: worst.avatar, detail: `${worst.player} missed by ${worst.miss_percent}%` });
     }
   }
 
   const pushes = picks.filter((p) => p.result === 'push');
   for (const p of pushes) {
-    awards.push({ key: 'push', emoji: '😐', title: 'Landed on the Number', user_id: p.user_id, detail: `${p.player} hit exactly ${p.line}` });
+    awards.push({ key: 'push', emoji: '😐', title: 'Landed on the Number', user_id: p.user_id, display_name: p.display_name, avatar: p.avatar, detail: `${p.player} hit exactly ${p.line}` });
   }
 
   return awards;

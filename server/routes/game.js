@@ -109,8 +109,13 @@ router.patch('/weeks/:id', requireAdmin, (req, res) => {
     if (!game.STATUSES.includes(req.body.status)) {
       return res.status(400).json({ error: `Status must be one of: ${game.STATUSES.join(', ')}.` });
     }
+    // A week can close without a bozo only when nobody lost. Otherwise there
+    // is someone on the hook and closing would skip the crowning.
     if (req.body.status === 'final' && !game.getBozo(week.id)) {
-      return res.status(400).json({ error: 'Declare a bozo before closing the week.' });
+      const losses = game.rawPicks(week.id).map(game.decoratePick).filter((p) => p.result === 'loss');
+      if (losses.length) {
+        return res.status(400).json({ error: 'Declare a bozo before closing the week.' });
+      }
     }
     updates.status = req.body.status;
   }
