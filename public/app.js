@@ -144,11 +144,15 @@ function confetti(colors) {
 /* ---------------- api ---------------- */
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: options.body ? { 'Content-Type': 'application/json' } : {},
-    ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetchApi(path, options);
+  } catch (err) {
+    // TypeError from fetch means the request never landed — offline, or the
+    // server is restarting. "Failed to fetch" means nothing to a person.
+    throw new Error("Can't reach the site. Check your connection, or it may be restarting.");
+  }
+
   if (res.status === 401) {
     window.location.href = '/login';
     throw new Error('Signed out.');
@@ -156,6 +160,14 @@ async function api(path, options = {}) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
   return data;
+}
+
+function fetchApi(path, options) {
+  return fetch(path, {
+    headers: options.body ? { 'Content-Type': 'application/json' } : {},
+    ...options,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
 }
 
 /* ---------------- state ---------------- */
@@ -192,6 +204,7 @@ const S = {
   // other views
   leaderboard: null,
   historyRows: null,
+  viewError: {},        // per-view load failure, so a dead fetch isn't an eternal spinner
   adminData: null,
   schedule: null,
 };
@@ -450,17 +463,25 @@ function statusStrip() {
 
 function viewWeek() {
   if (!S.week) {
-    return html`<div class="card"><div class="empty">
-      <div class="big">🏈</div>
-      <h2>No week is open yet</h2>
-      <p class="muted">${raw(
-        S.user.is_admin
-          ? 'Head to <b>Commissioner</b> and open Week 1 to get things rolling.'
-          : 'Sit tight — the commissioner has not opened a week yet. Meanwhile:'
-      )}</p>
-    </div>
-    <div style="max-width:520px;margin:0 auto">${raw(howItWorksHtml())}</div>
-    <p class="tiny faint center" style="margin-top:12px">Tap your name up top to set your emoji and contact info.</p>
+    return html`<div class="card">
+      <div class="empty">
+        <h2>No week is open yet</h2>
+        <p class="muted">${raw(
+          S.user.is_admin
+            ? 'Open the first week and everyone can start picking.'
+            : 'The commissioner hasn\'t opened one yet. Here\'s how it works in the meantime.'
+        )}</p>
+        ${raw(
+          S.user.is_admin
+            ? '<button class="btn primary" id="openFirstWeek">Open week 1</button>'
+            : ''
+        )}
+      </div>
+      <hr class="sep">
+      <div style="max-width:520px;margin:0 auto">${raw(howItWorksHtml())}</div>
+      <p class="tiny muted center" style="margin-top:14px">
+        Set your email in <button class="btn link" data-open-profile>your profile</button> so the weekly reminders reach you.
+      </p>
     </div>`;
   }
 
@@ -604,6 +625,54 @@ function viewWeek() {
   return parts.join('');
 }
 
+/**
+ * Buttons that appear on empty states. A first-run screen that only tells you
+ * where to go is a dead end; these do the thing.
+ */
+/** A load that failed is a state, not an absence. Say what happened, offer a retry. */
+function loadFailed(view, message) {
+  return html`<div class="card"><div class="empty">
+    <h2>Couldn't load this</h2>
+    <p class="muted">${message}</p>
+    <button class="btn primary" data-retry="${view}">Try again</button>
+  </div></div>`;
+}
+
+function wireEmptyStateActions() {
+  $$('[data-retry]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const view = b.dataset.retry;
+      S.viewError[view] = null;
+      if (view === 'shame') S.leaderboard = null;
+      if (view === 'history') S.historyRows = null;
+      if (view === 'admin') S.adminData = null;
+      render();
+    })
+  );
+
+  const openFirst = $('#openFirstWeek');
+  if (openFirst) {
+    openFirst.addEventListener('click', async () => {
+      openFirst.disabled = true;
+      openFirst.textContent = 'Opening…';
+      try {
+        await api('/api/weeks', { method: 'POST', body: {} });
+        S.adminData = null;
+        S.historyRows = null;
+        await loadState();
+        toast('Week 1 is open. Go make a pick.', 'ok');
+        window.location.hash = 'week';
+        render();
+      } catch (err) {
+        toast(err.message, 'err', 6000);
+        openFirst.disabled = false;
+        openFirst.textContent = 'Open week 1';
+      }
+    });
+  }
+  $$('[data-open-profile]').forEach((b) => b.addEventListener('click', profileModal));
+}
+
 /** "You went 1-0. Now 3-1, #2 in accuracy." — the line people screenshot. */
 function myWeekLine(mine) {
   if (!S.leaderboard) {
@@ -631,6 +700,7 @@ function myWeekLine(mine) {
 }
 
 function wireWeek() {
+  wireEmptyStateActions();
   const copyBtn = $('#copySummons');
   if (copyBtn) {
     copyBtn.addEventListener('click', async () => {
@@ -743,7 +813,11 @@ function openSummonsModal() {
 
 function viewPick() {
   if (!S.week) {
-    return html`<div class="card"><div class="empty"><div class="big">🏈</div><p>No week is open.</p></div></div>`;
+    return html`<div class="card"><div class="empty">
+      <h2>No week is open yet</h2>
+      <p class="muted">There's nothing to pick until the commissioner opens one.</p>
+      ${raw(S.user.is_admin ? '<button class="btn primary" id="openFirstWeek">Open week 1</button>' : '<a class="btn" href="#week">Back to this week</a>')}
+    </div></div>`;
   }
   const w = S.week.week;
   if (w.status !== 'open' && !S.user.is_admin) {
@@ -1388,6 +1462,7 @@ async function submitPick(body) {
 }
 
 function wirePick() {
+  wireEmptyStateActions();
   // The slate is free to fetch, so load it the first time this tab is opened.
   if (S.eventsState === 'idle') loadEvents(false, { rerender: false });
 
@@ -1617,20 +1692,27 @@ function wirePick() {
    ============================================================ */
 
 function viewVote() {
-  if (!S.week) return html`<div class="card"><div class="empty"><div class="big">🗳️</div><p>No week open.</p></div></div>`;
+  if (!S.week) {
+    return html`<div class="card"><div class="empty">
+      <h2>Nothing to vote on</h2>
+      <p class="muted">Voting opens once a week's results are in.</p>
+      <a class="btn" href="#week">Back to this week</a>
+    </div></div>`;
+  }
   const w = S.week.week;
 
   if (w.status === 'final') {
     return html`<div class="card"><div class="empty">
-      <div class="big">🤡</div><h2>The votes are counted</h2>
-      <p class="muted">${raw(S.week.bozo ? `${esc(S.week.bozo.display_name)} is the Week ${esc(w.week_number)} bozo.` : '')}</p>
+      <h2>The votes are counted</h2>
+      <p class="muted">${raw(S.week.bozo ? `${esc(S.week.bozo.display_name)} is the week ${esc(w.week_number)} bozo.` : '')}</p>
       <a class="btn primary" href="#week">See the damage</a>
     </div></div>`;
   }
   if (!w.voting_open) {
     return html`<div class="card"><div class="empty">
-      <div class="big">⏳</div><h2>Voting is not open yet</h2>
-      <p class="muted">Once the commissioner enters the stat lines, you get to point fingers.</p>
+      <h2>Voting isn't open yet</h2>
+      <p class="muted">Once the stat lines are in, you get to point fingers.</p>
+      <a class="btn" href="#week">Back to this week</a>
     </div></div>`;
   }
 
@@ -1818,11 +1900,22 @@ function castVote(nomineeId) {
    ============================================================ */
 
 function viewShame() {
+  if (S.viewError.shame) return loadFailed('shame', S.viewError.shame);
   if (!S.leaderboard) {
     loadLeaderboard();
     return html`<div class="card"><div class="spinner"></div></div>`;
   }
   const { rows, season, accuracy, group, min_picks_to_qualify } = S.leaderboard;
+
+  // A wall of 0% and 0-0 is noise, not information. Say so until there is
+  // something worth ranking.
+  if (!group || group.all_time.picks === 0) {
+    return html`<div class="card"><div class="empty">
+      <h2>Nothing to show yet</h2>
+      <p class="muted">Once a week is graded, this fills up: who's the biggest bozo, who's actually good at picking, and how the group is doing overall.</p>
+      <a class="btn" href="#week">Back to this week</a>
+    </div></div>`;
+  }
   const maxAll = Math.max(1, ...rows.map((r) => r.bozos_all_time));
   const g = group || { season: {}, all_time: {} };
 
@@ -1979,10 +2072,11 @@ function viewShame() {
 async function loadLeaderboard() {
   try {
     S.leaderboard = await api('/api/leaderboard');
-    render();
+    S.viewError.shame = null;
   } catch (err) {
-    toast(err.message, 'err');
+    S.viewError.shame = err.message;
   }
+  render();
 }
 
 /* ============================================================
@@ -1990,12 +2084,17 @@ async function loadLeaderboard() {
    ============================================================ */
 
 function viewHistory() {
+  if (S.viewError.history) return loadFailed('history', S.viewError.history);
   if (!S.historyRows) {
     loadHistory();
     return html`<div class="card"><div class="spinner"></div></div>`;
   }
   if (!S.historyRows.length) {
-    return html`<div class="card"><div class="empty"><div class="big">📜</div><p>No weeks recorded yet.</p></div></div>`;
+    return html`<div class="card"><div class="empty">
+      <h2>No history yet</h2>
+      <p class="muted">Finished weeks land here — who was the bozo, what the ticket paid, and the roast.</p>
+      <a class="btn" href="#week">Back to this week</a>
+    </div></div>`;
   }
 
   return html`<div class="card">
@@ -2026,13 +2125,15 @@ async function loadHistory() {
   try {
     const data = await api('/api/weeks');
     S.historyRows = data.weeks;
-    render();
+    S.viewError.history = null;
   } catch (err) {
-    toast(err.message, 'err');
+    S.viewError.history = err.message;
   }
+  render();
 }
 
 function wireHistory() {
+  wireEmptyStateActions();
   $$('[data-week]').forEach((row) =>
     row.addEventListener('click', async () => {
       try {
@@ -2068,6 +2169,7 @@ function showWeekModal(detail) {
 
 function viewAdmin() {
   if (!S.user.is_admin) return html`<div class="card"><div class="empty"><div class="big">🚫</div><p>Commissioners only.</p></div></div>`;
+  if (S.viewError.admin) return loadFailed('admin', S.viewError.admin);
   if (!S.adminData) {
     loadAdmin();
     return html`<div class="card"><div class="spinner"></div></div>`;
@@ -2393,10 +2495,11 @@ async function loadAdmin() {
     };
     S.quota = settingsRes.quota;
     S.channels = settingsRes.channels;
-    render();
+    S.viewError.admin = null;
   } catch (err) {
-    toast(err.message, 'err');
+    S.viewError.admin = err.message;
   }
+  render();
 }
 
 async function saveSettings(patch, successMsg) {
@@ -2412,6 +2515,7 @@ async function saveSettings(patch, successMsg) {
 }
 
 function wireAdmin() {
+  wireEmptyStateActions();
   $$('[data-status]').forEach((btn) =>
     btn.addEventListener('click', async () => {
       try {
@@ -2837,7 +2941,7 @@ function profileModal() {
    ============================================================ */
 
 const VIEWS = { week: viewWeek, pick: viewPick, vote: viewVote, shame: viewShame, history: viewHistory, admin: viewAdmin };
-const WIRES = { week: wireWeek, pick: wirePick, vote: wireVote, history: wireHistory, admin: wireAdmin };
+const WIRES = { week: wireWeek, pick: wirePick, vote: wireVote, shame: wireEmptyStateActions, history: wireHistory, admin: wireAdmin };
 
 function render() {
   renderTabs();
@@ -2862,10 +2966,8 @@ async function boot() {
     await api('/api/auth/logout', { method: 'POST' });
     window.location.href = '/login';
   });
-  $('#userChip').addEventListener('click', profileModal);
+  $('#profileBtn').addEventListener('click', profileModal);
   wireThemeToggle();
-  $('#userChip').style.cursor = 'pointer';
-  $('#userChip').title = 'Your profile';
 
   // The manual-entry form and admin market list both need the catalog.
   try {

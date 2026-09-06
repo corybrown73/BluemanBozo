@@ -39,10 +39,12 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
       </button>
     </div>
-    <div class="userchip" id="userChip" hidden title="Your profile">
-      <span class="av" id="userAvatar">🤡</span>
-      <span id="userName" class="chip-name">…</span>
-      <button class="btn sm ghost chip-out" id="logoutBtn" title="Sign out">Out</button>
+    <div class="userchip-group" id="userChip" hidden>
+      <button type="button" class="userchip" id="profileBtn" aria-label="Your profile and settings">
+        <span class="av" id="userAvatar" aria-hidden="true">🤡</span>
+        <span id="userName" class="chip-name">…</span>
+      </button>
+      <button type="button" class="btn sm ghost chip-out" id="logoutBtn">Sign out</button>
     </div>
   </div>
   <div class="topbar-inner" style="padding-top:0">
