@@ -89,6 +89,16 @@ app.use((err, req, res, next) => {
 });
 
 function start() {
+  // A hosted deploy has no terminal to run `npm run seed` in, so create the
+  // first commissioner from the environment. No-ops once anybody exists.
+  const boot = require('./bootstrap').bootstrap();
+  if (boot.status === 'created') {
+    console.log(`\n  ✓ First run: created commissioner "${boot.username}" from ADMIN_USERNAME/ADMIN_PASSWORD.`);
+    console.log('    Add everyone else in Commissioner → Members.');
+  } else if (boot.status === 'refused') {
+    console.error(`\n  ⚠  Could not create the first commissioner: ${boot.detail}`);
+  }
+
   const userCount = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
   const sched = require('./scheduler').start();
   const server = app.listen(PORT, () => {
@@ -98,7 +108,10 @@ function start() {
     console.log(
       `      digests: ${sched.enabled ? `on (${sched.jobs.length} jobs, ${sched.timezone})` : 'off — enable in Commissioner → Weekly schedule'}`
     );
-    if (userCount === 0) console.log('      ⚠  No members yet — run: npm run seed\n');
+    if (userCount === 0) {
+      console.log('      ⚠  No members yet. Locally: npm run seed');
+      console.log('         On a host: set ADMIN_USERNAME and ADMIN_PASSWORD, then redeploy.\n');
+    }
     else console.log('');
   });
   // Hosts send SIGTERM on deploy and hard-kill after a grace period. The cron

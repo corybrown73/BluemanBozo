@@ -24,3 +24,12 @@ services:
         value: https://www.bluemanbozo.com
       - key: ODDS_API_KEY
         sync: false        # set this in the Render dashboard, not in git
+      # First boot only: creates the commissioner account, because a host has
+      # no terminal to run `npm run seed` in. Ignored once anybody exists, so a
+      # redeploy can never reset a password. Everyone else is added in the app.
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_DISPLAY_NAME
+        sync: false
