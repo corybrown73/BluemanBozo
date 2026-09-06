@@ -317,17 +317,33 @@ Vercel/Netlify will not work for this.
 1. Push this repo to GitHub.
 2. Render → **New → Blueprint**, point at the repo. `render.yaml` sets up the web
    service, the 1 GB disk mounted at `/data`, and a generated `SESSION_SECRET`.
-3. In the dashboard, set **`ODDS_API_KEY`**. It is deliberately not in git.
-4. Deploy, then in a Render Shell run `npm run seed` once to create the members.
+3. In the dashboard, set the variables marked `sync: false`:
+   - **`ODDS_API_KEY`** — deliberately not in git.
+   - **`ADMIN_USERNAME`** and **`ADMIN_PASSWORD`** — your commissioner account.
+     Used **only** when the database has no members at all; see below.
+4. Deploy. The site comes up with your account already created and ready to
+   sign in. Add everyone else in **Commissioner → Members**.
+
+There is no seed step on a host, and you never need the Render Shell.
+
+#### About `ADMIN_USERNAME` / `ADMIN_PASSWORD`
+
+They create the first commissioner on a **completely empty** database, because
+a host has no terminal to run `npm run seed` in. Once any member exists the app
+ignores them entirely — a redeploy cannot reset a password, rename an account,
+or bring back a member you removed. So they are safe to leave set.
+
+If you ever want to change your password, do it in the app under your name in
+the top right, not by editing these.
 
 ### Fly.io
 
 ```bash
 fly launch --no-deploy
 fly volumes create bozo_data --size 1
-fly secrets set SESSION_SECRET=$(openssl rand -hex 32) ODDS_API_KEY=your_key_here
+fly secrets set SESSION_SECRET=$(openssl rand -hex 32) ODDS_API_KEY=your_key_here \
+  ADMIN_USERNAME=cory ADMIN_PASSWORD=pick-something-long
 fly deploy
-fly ssh console -C "npm run seed"
 ```
 
 ### Any Docker host
@@ -338,6 +354,7 @@ docker run -d -p 3000:3000 \
   -v /srv/bozo-data:/data \
   -e SESSION_SECRET=$(openssl rand -hex 32) \
   -e ODDS_API_KEY=your_key_here \
+  -e ADMIN_USERNAME=cory -e ADMIN_PASSWORD=pick-something-long \
   -e SITE_URL=https://www.bluemanbozo.com \
   --name bluemanbozo bluemanbozo
 ```
