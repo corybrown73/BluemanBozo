@@ -363,6 +363,27 @@ fly deploy
 fly ips list          # both should be listed before you expect the URL to work
 ```
 
+#### If the Fly dashboard says "Action required: merge new files"
+
+**Do not click "Just merge new files."** It overwrites `fly.toml` with the one
+the Launch UI generated, and that one does not carry the block this app cannot
+live without:
+
+```toml
+[[mounts]]
+  source = "bozo_data"
+  destination = "/data"
+```
+
+Without the mount, `/data` is container-local. The SQLite file — every pick,
+every bozo, the whole season's history — is wiped on every single deploy, and
+nothing warns you. The same merge also drops `DATA_DIR`, `SITE_URL`, the
+`/healthz` check, and `primary_region`.
+
+Click **"Create pull request"** instead if you want to see what it generated,
+then take only the parts you actually want. Or ignore the banner: the config in
+this repo is already complete, and `fly deploy` uses it.
+
 #### If the deploy says the app is not listening on the expected address
 
 ```
