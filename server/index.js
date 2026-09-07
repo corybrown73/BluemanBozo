@@ -88,7 +88,25 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something broke on our end.' });
 });
 
+/**
+ * Config that must be right before we accept a single request. SESSION_SECRET
+ * is otherwise only read when someone signs in, so a misconfigured deploy used
+ * to boot cleanly, pass its health check, and then 500 on the first login.
+ */
+function checkProductionConfig() {
+  if (process.env.NODE_ENV !== 'production') return;
+  const secret = process.env.SESSION_SECRET || '';
+  if (secret.length < 16) {
+    console.error('\n  ✖  SESSION_SECRET is missing or too short (need 16+ characters).');
+    console.error('     Nobody can sign in without it. Set it and redeploy:');
+    console.error('       Fly:    fly secrets set SESSION_SECRET=$(openssl rand -hex 32)');
+    console.error('       Render: add it under Environment (render.yaml generates one for you)\n');
+    process.exit(1);
+  }
+}
+
 function start() {
+  checkProductionConfig();
   // A hosted deploy has no terminal to run `npm run seed` in, so create the
   // first commissioner from the environment. No-ops once anybody exists.
   const boot = require('./bootstrap').bootstrap();
@@ -102,7 +120,11 @@ function start() {
   const userCount = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
   const sched = require('./scheduler').start();
   const server = app.listen(PORT, () => {
-    console.log(`\n  🤡  Blue Man Bozo running on http://localhost:${PORT}`);
+    const addr = server.address();
+    console.log(`\n  🤡  Blue Man Bozo listening on ${addr.address}:${addr.port}`);
+    if (process.env.NODE_ENV === 'production') {
+      console.log(`      the host must route to port ${addr.port} — if it expects another, set PORT to match`);
+    }
     console.log(`      group:   ${getSetting('group_name')}`);
     console.log(`      members: ${userCount}`);
     console.log(

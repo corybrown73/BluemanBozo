@@ -338,19 +338,58 @@ the top right, not by editing these.
 
 ### Fly.io
 
+Use the committed `fly.toml` — `fly launch` will offer to overwrite it, and the
+generated one uses different ports. Say no.
+
 ```bash
-fly launch --no-deploy
+fly launch --no-deploy --copy-config      # keep this repo's fly.toml
 fly volumes create bozo_data --size 1
-fly secrets set SESSION_SECRET=$(openssl rand -hex 32) ODDS_API_KEY=your_key_here \
-  ADMIN_USERNAME=cory ADMIN_PASSWORD=pick-something-long
+
+# Secrets FIRST. The app exits on boot without SESSION_SECRET, which shows up
+# as "health checks failed" rather than as anything about a missing secret.
+fly secrets set \
+  SESSION_SECRET=$(openssl rand -hex 32) \
+  ODDS_API_KEY=your_key_here \
+  ADMIN_USERNAME=cory \
+  ADMIN_PASSWORD=pick-something-long
+
+# First deploy only: give the app public IPs. flyctl sometimes fails to
+# allocate these itself ("error allocating ipv6 ... org_slug is only supported
+# with private_v6 type"), and then nothing can reach the app.
+fly ips allocate-v6
+fly ips allocate-v4 --shared
+
 fly deploy
+fly ips list          # both should be listed before you expect the URL to work
+```
+
+#### If the deploy says the app is not listening on the expected address
+
+```
+WARNING The app is not listening on the expected address ...
+- 0.0.0.0:8080
+Found these processes inside the machine with open listening sockets:
+node server/index.js │ [::]:3000
+```
+
+The port is the problem, not the address — `[::]` already accepts both IPv4 and
+IPv6. `internal_port` in `fly.toml` and the app's `PORT` must be the same
+number. Both are **8080** here, which is Fly's convention. If you let
+`fly launch` generate a fresh `fly.toml`, it writes `internal_port = 8080`
+while an older image may still start on 3000; redeploy from this repo's config.
+
+The startup log prints exactly what it bound to:
+
+```
+🤡  Blue Man Bozo listening on 0.0.0.0:8080
+    the host must route to port 8080 — if it expects another, set PORT to match
 ```
 
 ### Any Docker host
 
 ```bash
 docker build -t bluemanbozo .
-docker run -d -p 3000:3000 \
+docker run -d -p 3000:8080 \
   -v /srv/bozo-data:/data \
   -e SESSION_SECRET=$(openssl rand -hex 32) \
   -e ODDS_API_KEY=your_key_here \

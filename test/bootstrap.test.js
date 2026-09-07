@@ -76,3 +76,63 @@ test('a different admin username on redeploy does not create a second commission
   assert.strictEqual(res.status, 'skipped');
   assert.strictEqual(db.prepare('SELECT COUNT(*) AS n FROM users').get().n, 1);
 });
+
+/* ---------------- deploy-time configuration ---------------- */
+
+const { spawn } = require('node:child_process');
+
+/**
+ * Boot the real server binary with a given environment. Resolves as soon as the
+ * process exits on its own, or as soon as its output matches `until` — so the
+ * healthy case does not sit here waiting out a timeout.
+ */
+function bootWith(env, until) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmb-boot-run-'));
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server', 'index.js')], {
+    env: {
+      PATH: process.env.PATH,
+      NODE_ENV: 'production',
+      DATA_DIR: dir,
+      // Present-but-empty so dotenv cannot fill these from a developer's .env.
+      SESSION_SECRET: '',
+      ODDS_API_KEY: '',
+      ...env,
+    },
+  });
+
+  return new Promise((resolve) => {
+    let out = '';
+    let settled = false;
+    const finish = (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill('SIGKILL');
+      fs.rmSync(dir, { recursive: true, force: true });
+      resolve({ status, out });
+    };
+    const onData = (b) => {
+      out += b.toString();
+      if (until && until.test(out)) finish(null);   // booted far enough
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.on('exit', (code) => finish(code));
+    const timer = setTimeout(() => finish(null), 12000);
+  });
+}
+
+test('production refuses to boot without SESSION_SECRET, and says why', async () => {
+  const res = await bootWith({});
+  assert.strictEqual(res.status, 1, 'it exits rather than serving requests nobody can sign in to');
+  assert.match(res.out, /SESSION_SECRET/, 'the message names the variable');
+  assert.match(res.out, /fly secrets set|Render/, 'and says where to set it');
+});
+
+test('the server listens on PORT, so it can match whatever the host routes to', async () => {
+  // A mismatch here is what produces Fly's "not listening on the expected
+  // address" and a deploy that dies on health checks.
+  const res = await bootWith({ SESSION_SECRET: 'a'.repeat(32), PORT: '8080' }, /route to port/);
+  assert.match(res.out, /listening on \S+:8080/, `expected a bind on 8080, got:\n${res.out}`);
+  assert.match(res.out, /route to port 8080/, 'and it states the port the host must use');
+});

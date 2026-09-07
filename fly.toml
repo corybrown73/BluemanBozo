@@ -1,5 +1,12 @@
-# Deploy config for Fly.io. Create the volume first:
-#   fly volumes create bozo_data --size 1 --region <your-region>
+# Deploy config for Fly.io.
+#
+# Port 8080 is Fly's convention. internal_port and PORT must agree, or
+# fly-proxy waits on a port nothing is listening on and every health check
+# times out ("not listening on the expected address").
+#
+# Before the first deploy, set the secrets — the app needs them to run:
+#   fly secrets set SESSION_SECRET=$(openssl rand -hex 32) \
+#     ODDS_API_KEY=your_key ADMIN_USERNAME=cory ADMIN_PASSWORD=something-long
 app = "bluemanbozo"
 primary_region = "iad"
 
@@ -9,7 +16,7 @@ primary_region = "iad"
 [env]
   NODE_ENV = "production"
   DATA_DIR = "/data"
-  PORT = "3000"
+  PORT = "8080"
   SITE_URL = "https://www.bluemanbozo.com"
 
 [[mounts]]
@@ -17,7 +24,7 @@ primary_region = "iad"
   destination = "/data"
 
 [http_service]
-  internal_port = 3000
+  internal_port = 8080
   force_https = true
   auto_stop_machines = "suspend"
   auto_start_machines = true
