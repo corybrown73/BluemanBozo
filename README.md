@@ -419,6 +419,36 @@ docker run -d -p 3000:8080 \
   --name bluemanbozo bluemanbozo
 ```
 
+### Checking a live deployment
+
+```bash
+npm run check-deploy -- https://bluemanbozo.fly.dev
+npm run check-deploy -- https://bluemanbozo.fly.dev --user cory --pass 'your-password'
+```
+
+Read-only — it never creates a week, a pick or a vote. Signed out it checks the
+app is up, that a signed-out visitor cannot read anything, and that somebody
+exists to sign in as. With credentials it also reports the week, the members,
+the credits left, and whether live odds are actually loading, and it names the
+real upstream error when they are not.
+
+### Confirming the disk is really mounted
+
+This is the one thing no external check can see, and the one that quietly
+destroys a season. If `[[mounts]]` is missing from `fly.toml`, the app works
+perfectly — until a deploy, which wipes every pick and every bozo.
+
+Confirm it once, before you trust it with real history:
+
+```bash
+fly ssh console -C "df -h /data"     # want a real volume, not the root overlay
+fly volumes list                     # want ATTACHED, not "created"
+```
+
+Or prove it end to end in two minutes: sign in, add a member, redeploy with
+`fly deploy`, then sign in again. If that member is still there, the disk is
+mounted. If they are gone, stop and fix the mount before anyone plays a week.
+
 ### Pointing the Namecheap domain at it
 
 Your host will give you either a hostname (`bluemanbozo.onrender.com`) or an IP.
