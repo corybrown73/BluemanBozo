@@ -36,3 +36,11 @@ primary_region = "iad"
     method = "GET"
     path = "/healthz"
     timeout = "5s"
+
+# Pin the machine size rather than inheriting whatever it was created with.
+# Node plus a SQLite file for six people idles around 100 MB; 512 MB is ample
+# and cheaper than the 1 GB the Launch UI generates. Raise it here if you ever
+# see an out-of-memory restart in `fly logs`.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
