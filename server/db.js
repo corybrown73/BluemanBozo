@@ -183,6 +183,8 @@ const DEFAULT_SETTINGS = {
   // and warns if they disagree.
   odds_markets:
     'player_pass_yds,player_rush_yds,player_reception_yds,player_receptions,player_anytime_td',
+  // Only show games kicking off within this many days. 0 = the whole season.
+  slate_days: '8',
   props_cache_minutes: '360',
   events_cache_minutes: '60',
   monthly_credit_cap: '450',

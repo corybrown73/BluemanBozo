@@ -467,3 +467,35 @@ test('a cashed ticket is counted only when every settled leg won', async () => {
   assert.ok(before.tickets_total >= 1, 'at least one settled ticket');
   assert.strictEqual(before.tickets_cashed, 0, 'a week with a loss is not a cashed ticket');
 });
+
+test('the game list is narrowed to the current slate, not the whole season', () => {
+  const odds = require('../server/odds');
+  const { setSetting } = require('../server/db');
+  const day = 86400000;
+  const at = (d) => new Date(Date.now() + d * day).toISOString();
+
+  // What the Odds API actually returns in September: the rest of the season.
+  const season = [
+    { id: 'live', commence_time: at(-0.05) },   // kicked off an hour ago
+    { id: 'today', commence_time: at(0.2) },
+    { id: 'sunday', commence_time: at(2) },
+    { id: 'thursday', commence_time: at(6) },
+    { id: 'next_week', commence_time: at(11) },
+    { id: 'december', commence_time: at(90) },
+    { id: 'january', commence_time: at(130) },
+  ];
+
+  setSetting('slate_days', '8');
+  const slate = odds.withinSlate(season).map((e) => e.id);
+  assert.deepStrictEqual(slate, ['live', 'today', 'sunday', 'thursday'],
+    'this week only — a game 90 days out is not something anyone is picking');
+
+  setSetting('slate_days', '0');
+  assert.strictEqual(odds.withinSlate(season).length, season.length, '0 turns the window off');
+
+  setSetting('slate_days', '8');
+  // A quiet stretch must not look like a broken feed.
+  const farOff = [{ id: 'a', commence_time: at(60) }, { id: 'b', commence_time: at(61) }];
+  assert.strictEqual(odds.withinSlate(farOff).length, 2, 'falls back to showing something');
+  assert.deepStrictEqual(odds.withinSlate([]), [], 'but invents nothing');
+});

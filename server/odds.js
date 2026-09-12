@@ -272,26 +272,53 @@ async function request(pathname, params, { endpoint, credits }) {
 /* Public API                                                          */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Only this week's slate.
+ *
+ * The Odds API /events returns every scheduled game — in September that is the
+ * rest of the season, 212 of them. That buries the 16 games anyone is actually
+ * picking from, and turns "Load all games" into a 1,000-credit request against
+ * a 500-credit plan. The full list stays cached (the call is free); this just
+ * narrows what callers see.
+ *
+ * Set slate_days to 0 to turn the window off.
+ */
+function withinSlate(events) {
+  if (!Array.isArray(events)) return [];
+  const days = parseInt(getSetting('slate_days'), 10);
+  if (!Number.isFinite(days) || days <= 0) return events;
+  const now = Date.now();
+  const cutoff = now + days * 86400000;
+  const filtered = events.filter((e) => {
+    const t = Date.parse(e?.commence_time);
+    // A game that kicked off in the last few hours is still worth showing.
+    return Number.isFinite(t) && t >= now - 4 * 3600000 && t <= cutoff;
+  });
+  // Never hand back nothing when there genuinely are games — a quiet week
+  // should not look like a broken feed.
+  return filtered.length ? filtered : events.slice(0, 20);
+}
+
 /** Upcoming NFL games. FREE — costs zero credits. */
 async function getEvents({ force = false } = {}) {
   const ttl = parseInt(getSetting('events_cache_minutes'), 10) || 60;
   const cacheKey = 'events:nfl';
   if (!force) {
     const hit = cacheGet(cacheKey, ttl);
-    if (hit) return { events: hit.data, cached: true, fetched_at: hit.fetched_at };
+    if (hit) return { events: withinSlate(hit.data), cached: true, fetched_at: hit.fetched_at };
   }
   if (!hasApiKey()) {
     const stale = cacheGet(cacheKey, null);
-    if (stale) return { events: stale.data, cached: true, stale: true, fetched_at: stale.fetched_at };
+    if (stale) return { events: withinSlate(stale.data), cached: true, stale: true, fetched_at: stale.fetched_at };
     return { events: [], cached: false, fetched_at: null, error: 'No Odds API key configured.' };
   }
   try {
     const data = await request(`/sports/${SPORT}/events`, { dateFormat: 'iso' }, { endpoint: 'events', credits: 0 });
     cacheSet(cacheKey, data);
-    return { events: data, cached: false, fetched_at: new Date().toISOString() };
+    return { events: withinSlate(data), cached: false, fetched_at: new Date().toISOString() };
   } catch (err) {
     const stale = cacheGet(cacheKey, null);
-    if (stale) return { events: stale.data, cached: true, stale: true, fetched_at: stale.fetched_at, error: err.message };
+    if (stale) return { events: withinSlate(stale.data), cached: true, stale: true, fetched_at: stale.fetched_at, error: err.message };
     throw err;
   }
 }
@@ -572,6 +599,7 @@ async function getScores({ daysFrom = 3, force = false } = {}) {
 }
 
 module.exports = {
+  withinSlate,
   MARKETS,
   marketMeta,
   sideIsValid,
