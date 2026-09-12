@@ -3106,11 +3106,15 @@ function gradePanel() {
               <b>${p.display_name}</b>
               <div class="bet">${describePick(p)} <span class="mono">${oddsStr(p.price)}</span></div>
             </div>
-            <div class="num" style="display:flex;gap:6px;align-items:center">
+            <div class="num grade-cell">
               <input class="statline" data-pick="${p.id}" type="number" step="any"
                      value="${raw(p.actual_value ?? '')}" placeholder="actual"
+                     ${raw(p.result === 'void' ? 'disabled' : '')}
                      aria-label="${p.display_name} — what ${p.player} actually got, ${p.market_label}"
                      style="width:96px;text-align:right">
+              <button type="button" class="btn sm ghost void-toggle ${p.result === 'void' ? 'on' : ''}"
+                data-void="${p.id}" aria-pressed="${p.result === 'void' ? 'true' : 'false'}"
+                title="Player didn't play — no bet, no result">${raw(p.result === 'void' ? 'Voided' : 'DNP')}</button>
               <span class="badge ${p.result}">${raw(RESULT_ICON[p.result] || '')} ${p.result}</span>
             </div>
           </div>`
@@ -3120,8 +3124,11 @@ function gradePanel() {
     <div class="row" style="margin-top:12px">
       <button class="btn" id="pullStats">Pull stats from ESPN</button>
       <button class="btn primary" id="saveGrades">Grade the week</button>
-      <span class="tiny faint">Leave a box blank to keep it pending. All settled → voting opens.</span>
     </div>
+    <p class="tiny faint" style="margin-top:8px">
+      Blank keeps a pick pending. <b>DNP</b> voids it — the player sat, so it's no bet, not a loss.
+      Once every pick is settled, voting opens by itself.
+    </p>
   </div>`;
 }
 
@@ -3342,22 +3349,46 @@ function wireAdmin() {
     });
   }
 
+  // DNP: the player sat, so there is no bet to settle. Voided rather than
+  // typed in as 0, which would grade as a loss and hand someone a bozo for
+  // an injury report.
+  $$('[data-void]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const on = btn.getAttribute('aria-pressed') !== 'true';
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.classList.toggle('on', on);
+      btn.textContent = on ? 'Voided' : 'DNP';
+      const input = $(`.statline[data-pick="${btn.dataset.void}"]`);
+      if (input) {
+        input.disabled = on;
+        if (on) input.value = '';
+      }
+    })
+  );
+
   const saveGrades = $('#saveGrades');
   if (saveGrades) {
     saveGrades.addEventListener('click', async () => {
-      const results = $$('.statline').map((input) => ({
-        pick_id: Number(input.dataset.pick),
-        actual_value: input.value,
-      }));
+      const results = $$('.statline').map((input) => {
+        const voided = $(`[data-void="${input.dataset.pick}"]`)?.getAttribute('aria-pressed') === 'true';
+        return voided
+          ? { pick_id: Number(input.dataset.pick), result: 'void' }
+          : { pick_id: Number(input.dataset.pick), actual_value: input.value };
+      });
       try {
         const res = await api(`/api/weeks/${S.week.week.id}/grade`, { method: 'POST', body: { results } });
         S.week = res;
         (res.warnings || []).forEach((w) => toast('⚠️ ' + w, 'err', 9000));
-        toast('Graded. Voting is open.', 'ok');
+        const pending = res.picks.filter((p) => p.result === 'pending').length;
+        // Say what actually happened, not what we hoped would.
+        if (res.week.status === 'graded') toast('Graded. Voting is open.', 'ok');
+        else if (res.week.status === 'final') toast('Updated.', 'ok');
+        else toast(`Saved. ${pending} still pending — voting opens when every pick is settled.`, 'ok', 6000);
         S.leaderboard = null;
+        S.historyRows = null;
         render();
       } catch (err) {
-        toast(err.message, 'err');
+        toast(err.message, 'err', 8000);
       }
     });
   }

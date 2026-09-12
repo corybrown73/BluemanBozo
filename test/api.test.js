@@ -203,16 +203,20 @@ test('grading computes results and opens voting', async () => {
   assert.strictEqual(res.data.candidates[0].user_id, 2);
 });
 
-test('a blank stat line leaves the pick pending rather than grading it a loss', async () => {
+test('a blank stat line is never quietly graded as a loss', async () => {
+  // The week is already graded here, so a blank box is a slip, not an intent:
+  // it is refused outright and the settled result is left exactly as it was.
   const detail = await call('GET', `/api/weeks/${weekId}`);
   const pick = detail.data.picks[0];
-  await call('POST', `/api/weeks/${weekId}/grade`, { results: [{ pick_id: pick.id, actual_value: '' }] });
+  const res = await call('POST', `/api/weeks/${weekId}/grade`, { results: [{ pick_id: pick.id, actual_value: '' }] });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.data.error, /already graded/);
+
   const after = await call('GET', `/api/weeks/${weekId}`);
   const updated = after.data.picks.find((p) => p.id === pick.id);
-  assert.strictEqual(updated.result, 'pending');
-  assert.strictEqual(updated.actual_value, null);
-  // put it back so the rest of the flow has a settled week
-  await call('POST', `/api/weeks/${weekId}/grade`, { results: [{ pick_id: pick.id, actual_value: 95 }] });
+  assert.strictEqual(updated.result, 'win', 'the settled result is untouched');
+  assert.strictEqual(updated.actual_value, 95);
+  assert.strictEqual(after.data.week.status, 'graded', 'and the week did not slide backwards');
 });
 
 test('members vote and the tally is visible', async () => {

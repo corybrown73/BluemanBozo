@@ -308,6 +308,23 @@ router.post('/weeks/:id/grade', requireAdmin, (req, res) => {
   const results = Array.isArray(req.body?.results) ? req.body.results : [];
   if (!results.length) return res.status(400).json({ error: 'No stat lines submitted.' });
 
+  // Once the week is graded, a blank box is far more likely a slip than an
+  // intent to un-settle a bet. Inactive players get voided, not blanked.
+  if (game.statusRank(week.status) >= game.statusRank('graded')) {
+    const blanking = results.filter(
+      (row) => row.result !== 'void' && !Number.isFinite(scoring.toNum(row.actual_value))
+    );
+    if (blanking.length) {
+      const names = blanking
+        .map((row) => db.prepare('SELECT player FROM picks WHERE id = ? AND week_id = ?').get(row.pick_id, week.id)?.player)
+        .filter(Boolean);
+      return res.status(400).json({
+        error: `This week is already graded. ${names.join(', ') || 'A pick'} can't go back to pending — enter the number, or mark it void.`,
+      });
+    }
+  }
+  const crowned = game.getBozo(week.id);
+
   const update = db.prepare(
     `UPDATE picks SET actual_value = @actual_value, result = @result, graded_at = datetime('now'),
       updated_at = datetime('now') WHERE id = @id AND week_id = @week_id`
@@ -349,6 +366,25 @@ router.post('/weeks/:id/grade', requireAdmin, (req, res) => {
     db.prepare("UPDATE weeks SET status = 'graded' WHERE id = ?").run(week.id);
   }
 
+  // A corrected stat line can turn the crowned bozo's loss into a win. The
+  // crown cannot stand on a bet that didn't lose, so it comes off, the week
+  // reopens for a vote, and next week's ticket is nobody's again. Said out
+  // loud rather than left as a Hall of Shame entry that no longer adds up.
+  if (crowned) {
+    const stillLost = picks.some((p) => p.user_id === crowned.user_id && p.result === 'loss');
+    if (!stillLost) {
+      db.transaction(() => {
+        db.prepare('DELETE FROM bozos WHERE week_id = ?').run(week.id);
+        db.prepare("UPDATE weeks SET status = 'graded' WHERE id = ? AND status = 'final'").run(week.id);
+        db.prepare('UPDATE weeks SET payer_user_id = NULL WHERE season_id = ? AND week_number = ? AND payer_user_id = ?')
+          .run(week.season_id, week.week_number + 1, crowned.user_id);
+      })();
+      warnings.unshift(
+        `${crowned.display_name} was the bozo, but that pick no longer lost. The crown is off and the week is back to voting.`
+      );
+    }
+  }
+
   const graded = game.weekDetail(week.id, req.user);
   res.json(warnings.length ? { ...graded, warnings } : graded);
 });
@@ -367,6 +403,16 @@ router.post('/weeks/:id/vote', (req, res) => {
   const nomineeId = parseInt(req.body?.nominee_id, 10);
   const nominee = db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1').get(nomineeId);
   if (!nominee) return res.status(400).json({ error: 'Pick someone who actually exists.' });
+
+  // The vote screen only offers the losers, but the API has to hold the same
+  // line: a bozo is someone whose pick lost, and the crown goes to the top of
+  // the tally. Without this a vote for a winner could put a crown on them.
+  const lost = db
+    .prepare("SELECT 1 FROM picks WHERE week_id = ? AND user_id = ? AND result = 'loss'")
+    .get(week.id, nomineeId);
+  if (!lost) {
+    return res.status(400).json({ error: `${nominee.display_name} didn't lose this week. Only a loser can be the bozo.` });
+  }
 
   if (nomineeId === req.user.id && getSetting('allow_self_vote') !== '1') {
     return res.status(400).json({ error: 'Self-nomination is disabled. Admirable, but no.' });

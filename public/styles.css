@@ -707,3 +707,8 @@ button.board-section-head .spacer { flex: 1; }
   color: var(--gold); font-size: 11px; font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+
+/* grading: the DNP / void toggle */
+.grade-cell { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.void-toggle.on { border-color: var(--text-3); color: var(--text); background: var(--surface-2); }
+.statline:disabled { opacity: .4; }
