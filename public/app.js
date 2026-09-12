@@ -221,6 +221,10 @@ const S = {
   propCategory: 'Passing',  // active category pill
   propGroupBy: 'game',      // 'game' | 'team' | 'player'
   propSide: 'Over',         // which side the O/U cells show
+  // Multi-select on the board. Off, a tap opens the confirm panel; on, a tap
+  // adds or removes a candidate, so three can be lined up in three taps.
+  shortlistMode: false,
+  shortlistBusy: false,
   manualMarket: null,   // market chosen in the by-hand form
   slateEstimate: null,
   slateLoading: false,
@@ -461,6 +465,9 @@ function statusStrip() {
   const inCount = roster.filter((r) => r.picked).length;
   const waiting = roster.filter((r) => !r.picked);
   const mePicked = roster.find((r) => r.id === S.user.id)?.picked;
+  // Not picked, but thinking about it — worth saying out loud, because it is
+  // the difference between deliberating and forgetting.
+  const deliberating = roster.filter((r) => !r.picked && r.weighing > 0);
   const countdown = timeUntil(w.lock_at);
 
   let headline;
@@ -485,7 +492,16 @@ function statusStrip() {
           waiting.length && w.status === 'open'
             ? html`<div class="tiny muted" style="margin-top:3px">Waiting on <b>${raw(
                 waiting.map((r) => esc(r.display_name)).join(', ')
-              )}</b>${raw(countdown ? ` · locks in <b>${esc(countdown)}</b>` : '')}</div>`
+              )}</b>${raw(countdown ? ` · locks in <b>${esc(countdown)}</b>` : '')}</div>
+              ${raw(
+                deliberating.length
+                  ? html`<div class="tiny faint" style="margin-top:3px">${raw(
+                      deliberating
+                        .map((r) => `${esc(r.display_name)} is weighing ${esc(r.weighing)}`)
+                        .join(' · ')
+                    )}</div>`
+                  : ''
+              )}`
             : ''
         )}
       </div>
@@ -501,11 +517,22 @@ function statusStrip() {
       ${raw(
         roster
           .map(
-            (r) => html`<div class="chip ${r.picked ? 'in' : 'out'} ${r.id === S.user.id ? 'me' : ''}" title="${
-              r.picked ? 'Picked' : 'Has not picked'
-            }">
+            (r) => html`<div class="chip ${r.picked ? 'in' : 'out'} ${r.id === S.user.id ? 'me' : ''}" title="${raw(
+              r.picked
+                ? 'Picked'
+                : r.weighing
+                ? `Weighing ${esc(r.weighing)} — still deciding`
+                : 'Has not picked'
+            )}">
               <span class="chip-av">${r.avatar}</span>
               <span class="chip-name">${r.display_name}</span>
+              ${raw(
+                // Not picked, but not doing nothing either. The number is
+                // public; what is on the list is not.
+                !r.picked && r.weighing
+                  ? html`<span class="chip-weighing" aria-label="weighing ${r.weighing}">★${r.weighing}</span>`
+                  : ''
+              )}
               <span class="chip-state">${raw(r.picked ? '✓' : '…')}</span>
             </div>`
           )
@@ -911,6 +938,8 @@ function viewPick() {
         : ''
     )}
 
+    ${raw(shortlistPanel())}
+
     ${raw(
       S.eventsState === 'error' || (S.eventsState === 'ready' && !S.events.length)
         ? html`<div class="card">${raw(eventListBody())}</div>`
@@ -1167,7 +1196,19 @@ function propBoard() {
           : ''
       )}
       <input id="propFilter" aria-label="Search players" class="board-search" placeholder="Search players" value="${S.propFilter}">
+      <button class="btn sm ${raw(S.shortlistMode ? 'primary' : 'ghost')}" id="shortlistMode"
+        aria-pressed="${S.shortlistMode ? 'true' : 'false'}"
+        title="Line up a few you like, decide later">${raw(
+          S.shortlistMode ? '★ Done picking options' : '☆ Weigh a few'
+        )}${raw(myShortlist().length ? ` (${esc(myShortlist().length)})` : '')}</button>
     </div>
+
+    ${raw(
+      S.shortlistMode
+        ? html`<p class="hint starring-hint">Tap anything you're considering — it goes on your list, nothing is
+            committed. Everyone sees <b>how many</b> you're weighing, never which ones.</p>`
+        : ''
+    )}
 
     ${raw(
       S.props.failures && S.props.failures.length
@@ -1308,6 +1349,67 @@ function propRow(row, columns) {
 }
 
 /** One tappable odds button. Empty markets get a dash, not a dead button. */
+/* ---------------------------------------------------------------------------
+ * The shortlist: bets you are weighing, not bets you have made.
+ * ------------------------------------------------------------------------- */
+
+/** The same bet? Player, market, side and line all have to agree. */
+function sameBet(a, b) {
+  if (!a || !b) return false;
+  const line = (v) => (v === null || v === undefined ? null : Number(v));
+  return (
+    a.player === b.player &&
+    a.market === b.market &&
+    String(a.selection) === String(b.selection) &&
+    line(a.line) === line(b.line)
+  );
+}
+
+/** The viewer's shortlist for the open week. */
+function myShortlist() {
+  return (S.week && S.week.my_shortlist) || [];
+}
+
+/** The entry matching this board prop, if it is already on the list. */
+function shortlistEntryFor(prop) {
+  return myShortlist().find((e) => sameBet(e, prop)) || null;
+}
+
+/**
+ * What you are weighing, and the one tap that turns one of them into the bet.
+ * Shown on the pick tab whenever there is anything on the list.
+ */
+function shortlistPanel() {
+  const list = myShortlist();
+  if (!list.length) return '';
+  const max = (S.week && S.week.shortlist_max) || 8;
+
+  return html`<div class="card shortlist-card">
+    <div class="card-head">
+      <h2>You're weighing ${raw(list.length)}</h2>
+      <div class="spacer"></div>
+      <span class="tiny faint">${raw(list.length)} of ${raw(max)} · only one can be the bet</span>
+    </div>
+    ${raw(
+      list
+        .map(
+          (e) => html`<div class="sl-row">
+            <div class="sl-bet">
+              <b>${e.player}</b>
+              <div class="tiny faint">${e.market_label} ${e.selection}${raw(
+                e.line !== null && e.line !== undefined ? ' ' + esc(e.line) : ''
+              )} · ${oddsStr(e.price)}${raw(e.away_team ? ` · ${esc(e.away_team)} @ ${esc(e.home_team)}` : '')}</div>
+            </div>
+            <button class="btn sm primary" data-slpick="${e.id}">Bet this one</button>
+            <button class="btn sm ghost icon" data-sldrop="${e.id}" aria-label="Drop ${e.player} off your list">✕</button>
+          </div>`
+        )
+        .join('')
+    )}
+    <p class="tiny faint">Betting one clears the rest — they were only ever options.</p>
+  </div>`;
+}
+
 function propCell(sides, column) {
   if (!sides) return '<div class="board-cell empty-cell">—</div>';
 
@@ -1322,9 +1424,20 @@ function propCell(sides, column) {
   const idx = S.props.props.indexOf(pick);
   const selected = S.selectedProp === idx;
   const line = pick.line === null || pick.line === undefined ? null : pick.line;
+  const entry = shortlistEntryFor(pick);
+  const starring = S.shortlistMode;
+  const bet = `${esc(pick.player)} ${esc(pick.selection)} ${line !== null ? esc(line) : ''} ${esc(column.label)}`;
 
-  return html`<button class="board-cell ${selected ? 'selected' : ''}" data-prop="${idx}"
-    aria-label="${pick.player} ${pick.selection} ${raw(line !== null ? esc(line) : '')} ${column.label} ${oddsStr(pick.price)}">
+  // In shortlist mode the whole cell toggles, so the tap target stays the
+  // size it already is rather than becoming a star the size of a fingernail.
+  return html`<button class="board-cell ${selected ? 'selected' : ''} ${starring ? 'starring' : ''} ${
+    entry ? 'starred' : ''
+  }" ${raw(starring ? html`data-star="${idx}"` : html`data-prop="${idx}"`)}
+    ${raw(starring ? html`aria-pressed="${entry ? 'true' : 'false'}"` : '')}
+    aria-label="${raw(starring ? (entry ? 'Remove ' : 'Add ') : '')}${raw(bet)} ${oddsStr(pick.price)}${raw(
+      starring ? ' to your shortlist' : ''
+    )}">
+    ${raw(entry ? '<span class="cell-star" aria-hidden="true">★</span>' : '')}
     ${raw(line !== null ? html`<span class="cell-line">${line}</span>` : '')}
     <span class="cell-price">${raw(line !== null ? `${esc(pick.selection[0])} ` : '')}${oddsStr(pick.price)}</span>
   </button>`;
@@ -1654,6 +1767,121 @@ async function autoLoadBoard() {
   loadSlate(false);
 }
 
+/** The shortlist: the star toggle on the board, and the list underneath it. */
+function wireShortlist() {
+  const weekId = S.week?.week?.id;
+
+  const mode = $('#shortlistMode');
+  if (mode) {
+    mode.addEventListener('click', () => {
+      S.shortlistMode = !S.shortlistMode;
+      // Leaving a half-open confirm panel behind while the board turns into a
+      // multi-select is just confusing.
+      if (S.shortlistMode) {
+        S.selectedProp = null;
+        S.curve = null;
+      }
+      render();
+    });
+  }
+
+  // Toggling a bet on or off the list, straight from the board.
+  $$('[data-star]').forEach((btn) =>
+    btn.addEventListener('click', async () => {
+      if (!weekId || S.shortlistBusy) return;
+      const prop = S.props?.props?.[Number(btn.dataset.star)];
+      if (!prop) return;
+      const entry = shortlistEntryFor(prop);
+
+      S.shortlistBusy = true;
+      // Answer the tap now; the server is the slow part and the board is a
+      // grid of small targets where a lagging star reads as a missed tap.
+      btn.classList.toggle('starred', !entry);
+      try {
+        S.week = entry
+          ? await api(`/api/weeks/${weekId}/shortlist/${entry.id}`, { method: 'DELETE' })
+          : await api(`/api/weeks/${weekId}/shortlist`, {
+              method: 'POST',
+              body: {
+                player: prop.player,
+                market: prop.market,
+                market_label: prop.market_label,
+                selection: prop.selection,
+                line: prop.line ?? null,
+                price: prop.price,
+                event_id: prop.event_id || null,
+                home_team: prop.home_team || null,
+                away_team: prop.away_team || null,
+                commence_time: prop.commence_time || null,
+                bookmaker: prop.bookmaker || null,
+                line_source: 'book',
+              },
+            });
+        render();
+      } catch (err) {
+        btn.classList.toggle('starred', Boolean(entry)); // put it back
+        toast(err.message, 'err', 6000);
+      } finally {
+        S.shortlistBusy = false;
+      }
+    })
+  );
+
+  // "Bet this one" — the whole point of the list.
+  $$('[data-slpick]').forEach((btn) =>
+    btn.addEventListener('click', async () => {
+      const entry = myShortlist().find((e) => String(e.id) === btn.dataset.slpick);
+      if (!entry || !weekId) return;
+      btn.disabled = true;
+      const label = btn.textContent;
+      btn.textContent = 'Locking in…';
+      try {
+        const mine = (S.week.picks || []).find((p) => p.user_id === S.user.id);
+        S.week = await api(`/api/weeks/${weekId}/picks`, {
+          method: 'POST',
+          body: {
+            pick_id: mine ? mine.id : undefined,
+            player: entry.player,
+            market: entry.market,
+            market_label: entry.market_label,
+            selection: entry.selection,
+            line: entry.line ?? null,
+            price: entry.price,
+            event_id: entry.event_id,
+            home_team: entry.home_team,
+            away_team: entry.away_team,
+            commence_time: entry.commence_time,
+            bookmaker: entry.bookmaker,
+            line_source: entry.line_source || 'book',
+          },
+        });
+        S.shortlistMode = false;
+        S.selectedProp = null;
+        toast(`${entry.player} it is. The rest of your list is cleared.`, 'ok', 6000);
+        render();
+      } catch (err) {
+        toast(err.message, 'err', 7000);
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+    })
+  );
+
+  $$('[data-sldrop]').forEach((btn) =>
+    btn.addEventListener('click', async () => {
+      if (!weekId) return;
+      btn.disabled = true;
+      try {
+        S.week = await api(`/api/weeks/${weekId}/shortlist/${btn.dataset.sldrop}`, { method: 'DELETE' });
+        render();
+      } catch (err) {
+        toast(err.message, 'err');
+        btn.disabled = false;
+      }
+    })
+  );
+}
+
 function wirePick() {
   wireEmptyStateActions();
 
@@ -1801,6 +2029,8 @@ function wirePick() {
       loadCurve();
     })
   );
+
+  wireShortlist();
 
   const slider = $('#lineSlider');
   if (slider) {

@@ -8,6 +8,7 @@ const scoring = require('../scoring');
 const roastEngine = require('../roast');
 const notify = require('../notify');
 const odds = require('../odds');
+const shortlist = require('../shortlist');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -234,9 +235,39 @@ router.post('/weeks/:id/picks', (req, res) => {
     ).run(payload);
   }
 
+  // The list did its job. Keeping it after the bet is made just leaves stale
+  // numbers lying around for a member to tap next week.
+  const cleared = shortlist.clear(week.id, targetUserId);
+
   const detail = game.weekDetail(week.id, req.user);
   const warning = odds.lineWarning(market, line);
-  res.json(warning ? { ...detail, warning } : detail);
+  res.json({ ...detail, ...(warning ? { warning } : {}), shortlist_cleared: cleared });
+});
+
+/* ---------------- the shortlist: bets you are weighing ---------------- */
+
+/** Put one on your list. Costs nothing and commits to nothing. */
+router.post('/weeks/:id/shortlist', (req, res) => {
+  let week = game.getWeek(parseInt(req.params.id, 10));
+  if (!week) return res.status(404).json({ error: 'Week not found.' });
+  week = applyAutoLock(week);
+  if (week.status !== 'open') {
+    return res.status(409).json({ error: 'Picks are locked for this week.' });
+  }
+
+  const result = shortlist.add(week.id, req.user.id, req.body || {});
+  if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
+  res.json({ ...game.weekDetail(week.id, req.user), added: result.entry, already: Boolean(result.already) });
+});
+
+/** Take one off your own list. */
+router.delete('/weeks/:id/shortlist/:entryId', (req, res) => {
+  const week = game.getWeek(parseInt(req.params.id, 10));
+  if (!week) return res.status(404).json({ error: 'Week not found.' });
+
+  const gone = shortlist.remove(week.id, req.user.id, parseInt(req.params.entryId, 10));
+  if (!gone) return res.status(404).json({ error: 'That is not on your list.' });
+  res.json(game.weekDetail(week.id, req.user));
 });
 
 router.delete('/picks/:id', (req, res) => {

@@ -678,3 +678,32 @@ button.board-section-head .spacer { flex: 1; }
 }
 .hist-flag { flex-basis: 100%; }
 .hist-result { padding: 12px; border: 1px solid var(--green); border-radius: var(--r-sm); background: var(--surface-2); }
+
+/* ---- the shortlist: bets you are weighing ---- */
+.starring-hint { margin: -4px 0 14px; }
+.board-cell.starring { border-style: dashed; }
+.board-cell.starred {
+  border-color: var(--gold); border-style: solid;
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+}
+.board-cell { position: relative; }
+.cell-star {
+  position: absolute; top: 3px; right: 5px; font-size: 10px; line-height: 1;
+  color: var(--gold); pointer-events: none;
+}
+.shortlist-card { border-color: color-mix(in srgb, var(--gold) 35%, var(--border)); }
+.sl-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.sl-row:last-of-type { border-bottom: 0; }
+.sl-bet { flex: 1; min-width: 150px; }
+.btn.icon { padding: 0 12px; min-width: var(--tap); }
+
+/* the "★3" badge on a member chip: deliberating, not forgetting */
+.chip-weighing {
+  margin-left: 2px; padding: 1px 6px; border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--gold) 18%, transparent);
+  color: var(--gold); font-size: 11px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

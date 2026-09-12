@@ -17,6 +17,7 @@ const { db, getSetting, activeSeason } = require('./db');
 const scoring = require('./scoring');
 const roast = require('./roast');
 const { marketMeta } = require('./odds');
+const shortlist = require('./shortlist');
 
 const STATUSES = ['open', 'locked', 'graded', 'final'];
 
@@ -138,6 +139,7 @@ function weekDetail(weekId, viewer) {
 
   const picksRaw = rawPicks(weekId);
   const picks = picksRaw.map((p) => serializePick(p, viewer, week));
+  const weighing = new Map(shortlist.counts(weekId).map((r) => [r.user_id, r.count]));
   const decorated = picksRaw.map(decoratePick);
 
   const votes = getVotes(weekId);
@@ -229,9 +231,15 @@ function weekDetail(weekId, viewer) {
         picked_at: mine ? mine.created_at : null,
         // Same masking the pick itself gets: hidden picks read as pending.
         result: shown ? shown.result : null,
+        // How many they are still weighing. The number is public, what is on
+        // the list is not — that stays with whoever put it there.
+        weighing: weighing.get(u.id) || 0,
         is_payer: week.payer_user_id === u.id,
       };
     }),
+    // The viewer's own shortlist, in full. Nobody else's.
+    my_shortlist: viewer ? shortlist.forUser(week.id, viewer.id) : [],
+    shortlist_max: shortlist.limit(),
   };
 }
 

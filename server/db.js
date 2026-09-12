@@ -167,6 +167,37 @@ CREATE TABLE IF NOT EXISTS board_refreshes (
 );
 CREATE INDEX IF NOT EXISTS idx_refresh_week ON board_refreshes (week_id, user_id);
 
+-- Picks people are weighing but have not committed to.
+--
+-- Nobody makes their mind up in one go: they find three they like, sit on
+-- them, and pick one on Sunday morning. The sheet had nowhere to put that, so
+-- it happened in the group chat. This is that shortlist, and the COUNT is
+-- public on purpose — "Ricky is weighing 3" is half the fun. The contents stay
+-- with whoever put them there, so nobody can shop off someone else's homework.
+CREATE TABLE IF NOT EXISTS shortlist (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  week_id        INTEGER NOT NULL REFERENCES weeks(id) ON DELETE CASCADE,
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  event_id       TEXT,
+  home_team      TEXT,
+  away_team      TEXT,
+  commence_time  TEXT,
+  player         TEXT NOT NULL,
+  market         TEXT NOT NULL,
+  market_label   TEXT NOT NULL,
+  selection      TEXT NOT NULL,
+  line           REAL,
+  price          INTEGER NOT NULL DEFAULT -110,
+  bookmaker      TEXT,
+  line_source    TEXT NOT NULL DEFAULT 'book',
+  note           TEXT,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_shortlist_week ON shortlist (week_id, user_id);
+-- The same bet twice is a mis-tap, not a second opinion.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shortlist_unique
+  ON shortlist (week_id, user_id, player, market, selection, IFNULL(line, -999999));
+
 CREATE TABLE IF NOT EXISTS api_usage (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   endpoint    TEXT NOT NULL,
@@ -215,6 +246,9 @@ const DEFAULT_SETTINGS = {
   // Everyone gets a couple of pulls a week of their own. One person's refresh
   // updates the board for the whole group, so these are cheap in practice and
   // they happen when somebody actually wants new numbers.
+  // How many candidates one person may weigh at once. Enough to deliberate,
+  // not enough to shortlist the whole board.
+  shortlist_max: '8',
   refreshes_per_member: '2',
   // A refresh this soon after the last one is served from cache and does not
   // count — two people tapping within a minute of each other should not cost
