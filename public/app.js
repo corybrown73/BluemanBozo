@@ -2790,7 +2790,14 @@ function viewAdmin() {
                 <input id="wLock" type="datetime-local" value="${raw(toLocalInput(w.lock_at))}"></label>
               <label class="field"><span>Label</span><input id="wLabel" value="${w.label || ''}" placeholder="Divisional round"></label>
             </div>
-            <button class="btn sm" id="saveWeek">Save week settings</button>`
+            <button class="btn sm" id="saveWeek">Save week settings</button>
+            ${raw(
+              // Opened by accident? While nobody has picked, it can simply go.
+              w.status === 'open' && !S.week.picks.length
+                ? html`<button class="btn sm ghost danger" id="deleteWeek"
+                    title="Nobody has picked yet, so this week can be removed">Undo — delete week ${w.week_number}</button>`
+                : ''
+            )}`
           : html`<div class="empty">
               <p class="muted">No week is open yet</p>
               <button class="btn primary" id="openFirstWeek">Open week 1</button>
@@ -3380,6 +3387,26 @@ function wireAdmin() {
         render();
       } catch (err) {
         toast(err.message, 'err');
+      }
+    });
+  }
+
+  const delWeek = $('#deleteWeek');
+  if (delWeek) {
+    delWeek.addEventListener('click', async () => {
+      const n = S.week.week.week_number;
+      if (!confirm(`Delete week ${n}? Nobody has picked, so nothing is lost.`)) return;
+      delWeek.disabled = true;
+      try {
+        await api(`/api/weeks/${S.week.week.id}`, { method: 'DELETE' });
+        S.adminData = null;
+        S.historyRows = null;
+        await loadState();
+        toast(`Week ${n} is gone.`, 'ok');
+        render();
+      } catch (err) {
+        toast(err.message, 'err', 7000);
+        delWeek.disabled = false;
       }
     });
   }

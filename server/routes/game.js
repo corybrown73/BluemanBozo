@@ -136,10 +136,25 @@ router.patch('/weeks/:id', requireAdmin, (req, res) => {
   res.json(game.weekDetail(week.id, req.user));
 });
 
+/**
+ * Undo an accidentally opened week. Only an EMPTY one: deleting a week takes
+ * its picks, votes and bozo with it, and that is the season's record, not a
+ * slip to be undone with a button.
+ */
 router.delete('/weeks/:id', requireAdmin, (req, res) => {
-  const info = db.prepare('DELETE FROM weeks WHERE id = ?').run(parseInt(req.params.id, 10));
-  if (!info.changes) return res.status(404).json({ error: 'Week not found.' });
-  res.json({ ok: true });
+  const week = game.getWeek(parseInt(req.params.id, 10));
+  if (!week) return res.status(404).json({ error: 'Week not found.' });
+
+  const picks = db.prepare('SELECT COUNT(*) AS n FROM picks WHERE week_id = ?').get(week.id).n;
+  if (picks || week.status !== 'open') {
+    return res.status(409).json({
+      error: picks
+        ? `Week ${week.week_number} has ${picks} pick${picks === 1 ? '' : 's'} in it. Delete those first if you really mean it.`
+        : `Week ${week.week_number} is ${week.status}, not a fresh one. Reopen it instead of deleting it.`,
+    });
+  }
+  db.prepare('DELETE FROM weeks WHERE id = ?').run(week.id);
+  res.json({ ok: true, deleted: week.week_number });
 });
 
 /* ---------------- picks ---------------- */

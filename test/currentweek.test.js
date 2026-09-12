@@ -127,3 +127,23 @@ test('a locked week nobody picked in does not hold the season hostage', async ()
   await as('boss', 'PATCH', `/api/weeks/${ghost.id}`, { status: 'locked' });
   assert.strictEqual(currentWeek().id, w2.id, 'an empty locked week is skipped');
 });
+
+test('an accidentally opened week can be deleted while it is empty, and only then', async () => {
+  const oops = (await as('boss', 'POST', '/api/weeks', { week_number: 60 })).data.week;
+  const gone = await as('boss', 'DELETE', `/api/weeks/${oops.id}`);
+  assert.strictEqual(gone.status, 200);
+  assert.strictEqual(gone.data.deleted, 60);
+  assert.strictEqual((await as('boss', 'GET', `/api/weeks/${oops.id}`)).status, 404);
+
+  // The one with picks in it stays.
+  const keep = await as('boss', 'DELETE', `/api/weeks/${w2.id}`);
+  assert.strictEqual(keep.status, 409);
+  assert.match(keep.data.error, /pick/);
+
+  // And a settled week is never a delete, whatever is in it.
+  const settled = await as('boss', 'DELETE', `/api/weeks/${w1.id}`);
+  assert.strictEqual(settled.status, 409);
+
+  const member = await as('m', 'DELETE', `/api/weeks/${w2.id}`);
+  assert.strictEqual(member.status, 403, 'members cannot delete weeks at all');
+});
