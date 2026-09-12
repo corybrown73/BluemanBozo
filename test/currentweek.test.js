@@ -135,8 +135,10 @@ test('an accidentally opened week can be deleted while it is empty, and only the
   assert.strictEqual(gone.data.deleted, 60);
   assert.strictEqual((await as('boss', 'GET', `/api/weeks/${oops.id}`)).status, 404);
 
-  // The one with picks in it stays.
-  const keep = await as('boss', 'DELETE', `/api/weeks/${w2.id}`);
+  // One with a pick in it stays, however fresh.
+  const withPick = (await as('boss', 'POST', '/api/weeks', { week_number: 61 })).data.week;
+  await as('boss', 'POST', `/api/weeks/${withPick.id}/picks`, pick('Somebody', 30.5));
+  const keep = await as('boss', 'DELETE', `/api/weeks/${withPick.id}`);
   assert.strictEqual(keep.status, 409);
   assert.match(keep.data.error, /pick/);
 
@@ -144,6 +146,6 @@ test('an accidentally opened week can be deleted while it is empty, and only the
   const settled = await as('boss', 'DELETE', `/api/weeks/${w1.id}`);
   assert.strictEqual(settled.status, 409);
 
-  const member = await as('m', 'DELETE', `/api/weeks/${w2.id}`);
+  const member = await as('m', 'DELETE', `/api/weeks/${withPick.id}`);
   assert.strictEqual(member.status, 403, 'members cannot delete weeks at all');
 });
