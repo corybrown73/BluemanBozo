@@ -34,8 +34,8 @@ router.post('/users', (req, res) => {
 
   const info = db
     .prepare(
-      `INSERT INTO users (username, display_name, password_hash, email, phone, avatar, venmo, is_admin)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO users (username, display_name, password_hash, email, phone, avatar, is_admin)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       username,
@@ -44,7 +44,6 @@ router.post('/users', (req, res) => {
       req.body?.email || null,
       req.body?.phone || null,
       req.body?.avatar || '🤡',
-      req.body?.venmo || null,
       req.body?.is_admin ? 1 : 0
     );
 
@@ -56,7 +55,7 @@ router.patch('/users/:id', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!user) return res.status(404).json({ error: 'Member not found.' });
 
-  const LIMITS = { display_name: 40, email: 120, phone: 24, avatar: 8, venmo: 40 };
+  const LIMITS = { display_name: 40, email: 120, phone: 24, avatar: 8 };
   const updates = {};
   for (const key of Object.keys(LIMITS)) {
     if (req.body?.[key] === undefined) continue;

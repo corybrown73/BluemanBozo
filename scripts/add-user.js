@@ -31,7 +31,7 @@ const username = (positional[0] || '').toLowerCase();
 const displayName = positional[1];
 
 if (!username) {
-  console.error('Usage: node scripts/add-user.js <username> [display name] [--email x] [--phone +1...] [--venmo @x] [--avatar 🤡] [--password x] [--admin]');
+  console.error('Usage: node scripts/add-user.js <username> [display name] [--email x] [--phone +1...] [--avatar 🤡] [--password x] [--admin]');
   process.exit(1);
 }
 if (!/^[a-z0-9_.-]{2,32}$/.test(username)) {
@@ -47,7 +47,6 @@ const fields = {
   display_name: displayName || existing?.display_name || username,
   email: flag('email') ?? existing?.email ?? null,
   phone: flag('phone') ?? existing?.phone ?? null,
-  venmo: flag('venmo') ?? existing?.venmo ?? null,
   avatar: flag('avatar') ?? existing?.avatar ?? '🤡',
   is_admin: flag('admin') ? 1 : existing?.is_admin ?? 0,
 };
@@ -68,8 +67,8 @@ if (existing) {
     process.exit(1);
   }
   db.prepare(
-    `INSERT INTO users (username, display_name, password_hash, email, phone, venmo, avatar, is_admin)
-     VALUES (@username, @display_name, @password_hash, @email, @phone, @venmo, @avatar, @is_admin)`
+    `INSERT INTO users (username, display_name, password_hash, email, phone, avatar, is_admin)
+     VALUES (@username, @display_name, @password_hash, @email, @phone, @avatar, @is_admin)`
   ).run({ ...fields, username, password_hash: hashPassword(pw) });
   console.log(`\n✓ Added ${fields.display_name} (@${username})`);
   console.log(`  password: ${pw}${generated ? '  (generated — save it now)' : ''}\n`);

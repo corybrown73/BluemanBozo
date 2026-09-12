@@ -101,7 +101,7 @@ function clearSessionCookie(res) {
 /* ---------- middleware ---------- */
 
 const publicUserCols =
-  'id, username, display_name, email, phone, avatar, venmo, is_admin, is_active, created_at';
+  'id, username, display_name, email, phone, avatar, is_admin, is_active, created_at';
 
 function attachUser(req, res, next) {
   req.user = null;

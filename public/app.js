@@ -207,6 +207,7 @@ const S = {
   props: null,
   propsLoading: false,
   propsError: null,
+  shameScope: 'all',   // 'season' | 'all'
   boardNotLoaded: false,
   propFilter: '',
   selectedProp: null,
@@ -595,7 +596,7 @@ function viewWeek() {
             ? html`<span class="payline-av">${payer.avatar}</span>
               <div>
                 <div><b>${payer.display_name}</b> is paying <span class="faint">· ${money(w.stake_cents)}</span></div>
-                <div class="tiny faint">last week's bozo${raw(payer.venmo ? ` · Venmo ${esc(payer.venmo)}` : '')}${raw(
+                <div class="tiny faint">last week's bozo${raw(
                   countdown && w.status === 'open' ? ` · locks in <b>${esc(countdown)}</b>` : ''
                 )}</div>
               </div>`
@@ -2039,6 +2040,17 @@ function viewShame() {
     </div></div>`;
   }
   const maxAll = Math.max(1, ...rows.map((r) => r.bozos_all_time));
+  // The table ranked on all-time no matter what, which made a season view
+  // lie about who is actually leading this year.
+  const seasonOnly = S.shameScope === 'season';
+  const ranked = [...(accuracy || [])].sort((a, b) => {
+    const A = seasonOnly ? a.season : a.all_time;
+    const B = seasonOnly ? b.season : b.all_time;
+    const aq = (A.wins + A.losses) >= (min_picks_to_qualify || 0);
+    const bq = (B.wins + B.losses) >= (min_picks_to_qualify || 0);
+    if (aq !== bq) return aq ? -1 : 1;
+    return (B.win_pct || 0) - (A.win_pct || 0);
+  });
   const g = group || { season: {}, all_time: {} };
 
   return html`
@@ -2071,27 +2083,40 @@ function viewShame() {
       <div class="card-head">
         <h2>Accuracy</h2>
         <div class="spacer"></div>
-        <span class="tiny faint">${raw(min_picks_to_qualify ? `${esc(min_picks_to_qualify)}+ picks to rank` : '')}</span>
+        <div class="seg" role="group" aria-label="Which record to show">
+          <button class="seg-btn ${seasonOnly ? 'active' : ''}" data-shame="season"
+            aria-pressed="${seasonOnly ? 'true' : 'false'}">${season.year}</button>
+          <button class="seg-btn ${seasonOnly ? '' : 'active'}" data-shame="all"
+            aria-pressed="${seasonOnly ? 'false' : 'true'}">All time</button>
+        </div>
       </div>
+      <p class="hint">${raw(
+        min_picks_to_qualify ? `${esc(min_picks_to_qualify)}+ picks to rank.` : ''
+      )} Ranked on ${raw(seasonOnly ? esc(season.year) : 'every season on record')}.</p>
       ${raw(
-        (accuracy || [])
+        ranked
           .map((a, i) => {
-            const at = a.all_time;
-            const se = a.season;
-            const w = Math.round((at.win_pct || 0) * 100);
-            return html`<div class="acc-row ${a.user.id === S.user.id ? 'me' : ''} ${a.qualified ? '' : 'unranked'}">
-              <div class="acc-rank">${raw(a.qualified ? '#' + (i + 1) : '—')}</div>
+            const shown = seasonOnly ? a.season : a.all_time;
+            const other = seasonOnly ? a.all_time : a.season;
+            const w = Math.round((shown.win_pct || 0) * 100);
+            // Ranking on a record nobody has yet is noise, so the badge only
+            // appears once someone has enough picks in the scope being shown.
+            const qualifies = (shown.wins + shown.losses) >= (min_picks_to_qualify || 0);
+            return html`<div class="acc-row ${a.user.id === S.user.id ? 'me' : ''} ${qualifies ? '' : 'unranked'}">
+              <div class="acc-rank">${raw(qualifies ? '#' + (i + 1) : '—')}</div>
               <span class="av" aria-hidden="true">${a.user.avatar}</span>
               <div class="acc-who">
                 <b>${a.user.display_name}</b>
-                <div class="tiny faint">${season.year}: ${se.wins}-${se.losses}${raw(
-                  se.pushes ? `-${esc(se.pushes)}` : ''
-                )} · all-time ${at.wins}-${at.losses}${raw(at.pushes ? `-${esc(at.pushes)}` : '')}</div>
+                <div class="tiny faint">${raw(
+                  seasonOnly
+                    ? `${esc(season.year)}: ${esc(shown.wins)}-${esc(shown.losses)} · all-time ${esc(other.wins)}-${esc(other.losses)}`
+                    : `${esc(shown.wins)}-${esc(shown.losses)} all time · ${esc(season.year)}: ${esc(other.wins)}-${esc(other.losses)}`
+                )}</div>
                 <div class="meter small acc-meter"><i style="width:${raw(w)}%"></i></div>
               </div>
               <div class="acc-pct">
-                <div class="mono">${raw(a.qualified ? w + '%' : '<span class="faint">' + w + '%</span>')}</div>
-                <div class="tiny faint">${raw(a.qualified ? 'all-time' : 'too few')}</div>
+                <div class="mono">${raw(qualifies ? w + '%' : '<span class="faint">' + w + '%</span>')}</div>
+                <div class="tiny faint">${raw(qualifies ? (seasonOnly ? esc(season.year) : 'all-time') : 'too few')}</div>
               </div>
             </div>`;
           })
@@ -2922,7 +2947,6 @@ function memberModal(user) {
     <label class="field"><span>Display name</span><input id="fDisplay" maxlength="40" value="${user?.display_name || ''}"></label>
     <div class="grid two">
       <label class="field"><span>Emoji</span><input id="fAvatar" maxlength="8" value="${user?.avatar || '🤡'}"></label>
-      <label class="field"><span>Venmo</span><input id="fVenmo" value="${user?.venmo || ''}" placeholder="@dave-smith"></label>
       <label class="field"><span>Email</span><input id="fEmail" type="email" value="${user?.email || ''}"></label>
       <label class="field"><span>Phone (E.164)</span><input id="fPhone" value="${user?.phone || ''}" placeholder="+15551234567"></label>
     </div>
@@ -2949,7 +2973,6 @@ function memberModal(user) {
       avatar: $('#fAvatar', m.el).value.trim() || '🤡',
       email: $('#fEmail', m.el).value.trim(),
       phone: $('#fPhone', m.el).value.trim(),
-      venmo: $('#fVenmo', m.el).value.trim(),
       is_admin: $('#fAdmin', m.el).checked,
     };
     const password = $('#fPassword', m.el).value;
@@ -3062,8 +3085,6 @@ function profileModal() {
       <label class="field"><span>Phone <span class="faint">— for texts</span></span>
         <input id="pfPhone" value="${u.phone || ''}" placeholder="+15551234567"></label>
     </div>
-    <label class="field"><span>Venmo <span class="faint">— shown when you owe the ticket</span></span>
-      <input id="pfVenmo" value="${u.venmo || ''}" placeholder="@your-handle"></label>
     <button class="btn primary" id="pfSave">Save profile</button>
 
     <hr class="sep">
@@ -3104,7 +3125,6 @@ function profileModal() {
           display_name: $('#pfName', m.el).value.trim(),
           email: $('#pfEmail', m.el).value.trim(),
           phone: $('#pfPhone', m.el).value.trim(),
-          venmo: $('#pfVenmo', m.el).value.trim(),
           avatar,
         },
       });
@@ -3139,7 +3159,17 @@ function profileModal() {
    ============================================================ */
 
 const VIEWS = { week: viewWeek, pick: viewPick, vote: viewVote, shame: viewShame, history: viewHistory, admin: viewAdmin };
-const WIRES = { week: wireWeek, pick: wirePick, vote: wireVote, shame: wireEmptyStateActions, history: wireHistory, admin: wireAdmin };
+function wireShame() {
+  wireEmptyStateActions();
+  $$('[data-shame]').forEach((b) =>
+    b.addEventListener('click', () => {
+      S.shameScope = b.dataset.shame;
+      render();
+    })
+  );
+}
+
+const WIRES = { week: wireWeek, pick: wirePick, vote: wireVote, shame: wireShame, history: wireHistory, admin: wireAdmin };
 
 function render() {
   renderTabs();

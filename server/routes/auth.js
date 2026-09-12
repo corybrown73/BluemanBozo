@@ -52,7 +52,7 @@ router.post('/change-password', auth.requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-const PROFILE_LIMITS = { display_name: 40, email: 120, phone: 24, avatar: 8, venmo: 40 };
+const PROFILE_LIMITS = { display_name: 40, email: 120, phone: 24, avatar: 8 };
 
 router.patch('/profile', auth.requireAuth, (req, res) => {
   const fields = {};

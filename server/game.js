@@ -28,7 +28,7 @@ function statusRank(status) {
 function listUsers({ includeInactive = false } = {}) {
   const where = includeInactive ? '' : 'WHERE is_active = 1';
   return db
-    .prepare(`SELECT id, username, display_name, email, phone, avatar, venmo, is_admin, is_active FROM users ${where} ORDER BY display_name COLLATE NOCASE`)
+    .prepare(`SELECT id, username, display_name, email, phone, avatar, is_admin, is_active FROM users ${where} ORDER BY display_name COLLATE NOCASE`)
     .all()
     .map((u) => ({ ...u, is_admin: !!u.is_admin, is_active: !!u.is_active }));
 }
@@ -110,7 +110,7 @@ function getBozo(weekId) {
   return (
     db
       .prepare(
-        `SELECT b.*, u.display_name, u.avatar, u.venmo, u.username
+        `SELECT b.*, u.display_name, u.avatar, u.username
          FROM bozos b JOIN users u ON u.id = b.user_id WHERE b.week_id = ?`
       )
       .get(weekId) || null
@@ -175,7 +175,7 @@ function weekDetail(weekId, viewer) {
   }));
 
   const payer = week.payer_user_id
-    ? db.prepare('SELECT id, display_name, avatar, venmo FROM users WHERE id = ?').get(week.payer_user_id)
+    ? db.prepare('SELECT id, display_name, avatar FROM users WHERE id = ?').get(week.payer_user_id)
     : null;
 
   const awards = statusRank(week.status) >= statusRank('graded') ? roast.weeklyAwards(decorated) : [];
@@ -279,7 +279,7 @@ function leaderboard({ seasonId = null } = {}) {
       .sort((a, b) => (b.bozo_score || 0) - (a.bozo_score || 0))[0] || null;
 
     return {
-      user: { id: u.id, display_name: u.display_name, avatar: u.avatar, username: u.username, is_active: u.is_active, venmo: u.venmo },
+      user: { id: u.id, display_name: u.display_name, avatar: u.avatar, username: u.username, is_active: u.is_active },
       bozos_all_time: counts.all_time,
       bozos_season: counts.season,
       title: roast.titleFor(counts.all_time),
