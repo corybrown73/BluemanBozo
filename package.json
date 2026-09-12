@@ -19,7 +19,8 @@
     "check-injuries": "node scripts/check-injuries.js",
     "check-roster": "node scripts/check-roster.js",
     "check-deploy": "node scripts/check-deploy.js",
-    "check-boxscore": "node scripts/check-boxscore.js"
+    "check-boxscore": "node scripts/check-boxscore.js",
+    "make-logos": "node scripts/make-logos.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

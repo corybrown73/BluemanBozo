@@ -162,8 +162,7 @@ button { font: inherit; }
 .topbar-inner { max-width: 1040px; margin: 0 auto; padding: 12px 20px 0; display: flex; align-items: center; gap: 14px; }
 .topbar-inner + .topbar-inner { padding-top: 6px; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; margin-right: auto; min-width: 0; }
-.brand-mark { width: 32px; height: 32px; flex: none; border-radius: var(--r-xs); display: grid; place-items: center; font-size: 17px; background: var(--brand-fill); color: #fff; overflow: hidden; box-shadow: var(--brand-glow); }
-.brand-mark img { width: 100%; height: 100%; object-fit: cover; object-position: center 38%; transform: scale(1.45); display: block; }
+.brand-mark { width: 32px; height: 32px; flex: none; border-radius: var(--r-xs); display: grid; place-items: center; font-size: 17px; background: var(--brand-fill); color: #fff; box-shadow: var(--brand-glow); }
 .brand-text b { display: block; font-size: 15px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
 .brand-text span { display: block; font-size: 12.5px; color: var(--text-3); margin-top: -2px; }
 
@@ -466,9 +465,14 @@ button.rowbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-r
 .login-card { width: 100%; max-width: 400px; background: var(--surface); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border: 1px solid var(--border); border-radius: 24px; padding: 36px 32px; box-shadow: var(--shadow-lg); }
 .login-card .logo { text-align: center; margin-bottom: 26px; }
 .login-card .logo .mark { font-size: 46px; line-height: 1; }
-.login-card .logo .mark:has(img) { display: block; width: min(190px, 62vw); margin: 0 auto; aspect-ratio: 1; }
+.login-card .logo .mark:has(img) { display: block; width: min(300px, 78vw); margin: 0 auto; aspect-ratio: 1; }
+/* The artwork's own black field sits on a near-black page, so its square edge
+   shows as an accidental rectangle. Rounding it makes the edge deliberate. */
 .login-card .logo .mark img { width: 100%; height: 100%; object-fit: contain; display: block;
-  filter: drop-shadow(0 0 28px rgba(45, 125, 255, .28)); }
+  border-radius: 22px; filter: drop-shadow(0 0 44px rgba(45, 125, 255, .38)); }
+/* The card gets out of the way — on the landing page the artwork is the page. */
+.login-card:has(.logo img) { background: transparent; border-color: transparent; box-shadow: none; backdrop-filter: none; }
+.login-card .logo:has(img) { margin-bottom: 8px; }
 /* With the artwork present the wordmark is already in it — no need to say it twice. */
 .login-card .logo:has(img) h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .login-card .logo h1 { font-size: 24px; font-weight: 600; margin-top: 12px; letter-spacing: -.03em; }
