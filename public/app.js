@@ -2501,7 +2501,7 @@ function viewShame() {
         <div class="stat">
           <div class="stat-big">${pct(g.all_time.win_pct)}</div>
           <div class="stat-label">all-time win rate</div>
-          <div class="stat-sub">${g.all_time.wins}-${g.all_time.losses} · ${g.all_time.picks} picks</div>
+          <div class="stat-sub">${g.all_time.wins}-${g.all_time.losses} · ${g.all_time.picks} pick${raw(g.all_time.picks === 1 ? '' : 's')}</div>
         </div>
       </div>
     </div>
