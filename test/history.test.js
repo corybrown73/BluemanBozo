@@ -201,3 +201,46 @@ test('a sheet that records who paid is still recognised as a grid', () => {
     .get(season.id).n;
   assert.strictEqual(crowned, 3, 'each week got its bozo');
 });
+
+
+/* ---------------- importing on boot, with nobody at the keyboard ---------------- */
+
+test('on boot, the sheet imports itself when every column is an exact account', () => {
+  // Cory exists by display name; Michael's account is @michael (shown as Mike),
+  // which is an exact username match. Both are unambiguous.
+  const r = history.autoImport({ csv: 'Week,Cory,Michael\n1,Hit,Miss\n2,Miss,Hit', seasonYear: 2016 });
+  assert.strictEqual(r.status, 'imported');
+  assert.strictEqual(r.weeks, 2);
+  assert.strictEqual(r.results, 4);
+
+  const mike = db.prepare("SELECT id FROM users WHERE username = 'michael'").get();
+  const season = db.prepare('SELECT id FROM seasons WHERE year = 2016').get();
+  const mikeRows = db
+    .prepare('SELECT COUNT(*) AS n FROM picks p JOIN weeks w ON w.id = p.week_id WHERE w.season_id = ? AND p.user_id = ?')
+    .get(season.id, mike.id).n;
+  assert.strictEqual(mikeRows, 2, "the Michael column landed on Mike's account");
+});
+
+test('on boot, a column that would need a guess stops the whole import', () => {
+  const before = db.prepare('SELECT COUNT(*) AS n FROM picks').get().n;
+  const users = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+  // "Mik" is a fuzzy match for Mike, and "Nobody" has no account at all.
+  const r = history.autoImport({ csv: 'Week,Cory,Mik,Nobody\n1,Hit,Miss,Hit', seasonYear: 2015 });
+  assert.strictEqual(r.status, 'ambiguous');
+  assert.deepStrictEqual(r.unmatched.sort(), ['Mik', 'Nobody']);
+  assert.strictEqual(db.prepare('SELECT COUNT(*) AS n FROM picks').get().n, before, 'nothing was written');
+  assert.strictEqual(db.prepare('SELECT COUNT(*) AS n FROM users').get().n, users, 'and no account was invented');
+});
+
+test('on boot, a season that already has results is left alone', () => {
+  const r = history.autoImport({ csv: 'Week,Cory,Michael\n1,Miss,Miss', seasonYear: 2016 });
+  assert.strictEqual(r.status, 'already');
+  assert.strictEqual(r.results, 4, 'the four results from the first boot, untouched');
+});
+
+test('on boot, no sheet means nothing happens', () => {
+  const r = history.autoImport({ csv: '   ', seasonYear: 2014 });
+  // An empty override falls back to the bundled sheet if present, so only
+  // assert the outcome is one of the quiet ones.
+  assert.ok(['no-sheet', 'already', 'ambiguous', 'imported'].includes(r.status));
+});

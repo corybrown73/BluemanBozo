@@ -123,6 +123,19 @@ function start() {
     process.exit(1);
   }
 
+  // Last season's sheet ships with the app. Put it in the Hall of Shame on
+  // the first boot where that is unambiguous; otherwise say what is in the
+  // way and leave it for Commissioner → Setup → Import.
+  const past = require('./history').autoImport();
+  if (past.status === 'imported') {
+    console.log(`\n  ✓ Imported the ${past.season_year} sheet: ${past.weeks} weeks, ${past.results} results.`);
+  } else if (past.status === 'ambiguous') {
+    console.log(`\n  ! The ${past.season_year} sheet was not imported: no exact account for ${past.unmatched.join(', ')}.`);
+    console.log('    Match the columns yourself under Commissioner → Setup → Import the old spreadsheet.');
+  } else if (past.status === 'failed') {
+    console.log(`\n  ! The ${past.season_year} sheet could not be imported: ${past.reason}`);
+  }
+
   const userCount = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
   const sched = require('./scheduler').start();
   const server = app.listen(PORT, () => {

@@ -370,4 +370,55 @@ function importGrid({ csv, seasonYear, mapping = {} } = {}) {
   return report;
 }
 
-module.exports = { preview, importGrid, parseCsv, looksLikeGrid, readGrid, BUNDLED };
+/**
+ * Import the bundled sheet on boot, with nobody at the keyboard — but only
+ * when there is nothing to decide.
+ *
+ * The host has no terminal and the commissioner should not have to find a
+ * button for data that has been sitting in the repo all along. So the app
+ * does it itself the first time it starts with the sheet present, provided
+ * every column lands on exactly one existing account by name. The moment a
+ * column would need a guess (Michael in the sheet, Mike in the app) or a new
+ * account, it stops and leaves it for the Commissioner tab, where the mapping
+ * is shown before anything is written. A wrong guess here would split a
+ * career record in two; a skipped import costs one tap later.
+ *
+ * @returns {{status:'no-sheet'|'already'|'ambiguous'|'imported'|'failed', ...}}
+ */
+function autoImport({ csv, seasonYear } = {}) {
+  const text = readSheet(csv);
+  if (!text) return { status: 'no-sheet' };
+
+  // The bundled file says which season it is in its name.
+  const named = path.basename(BUNDLED).match(/(\d{4})/);
+  const year = Number.isFinite(seasonYear) ? seasonYear : named ? parseInt(named[1], 10) : nflSeasonYear(new Date()) - 1;
+
+  const season = db.prepare('SELECT * FROM seasons WHERE year = ?').get(year);
+  if (season) {
+    const have = db
+      .prepare('SELECT COUNT(*) AS n FROM picks p JOIN weeks w ON w.id = p.week_id WHERE w.season_id = ?')
+      .get(season.id).n;
+    if (have > 0) return { status: 'already', season_year: year, results: have };
+  }
+
+  const rows = parseCsv(text);
+  if (rows.length < 2 || !looksLikeGrid(rows)) return { status: 'failed', reason: 'The sheet is not a Hit/Miss grid.' };
+  const { columns } = readGrid(rows);
+  const users = db.prepare('SELECT id, username, display_name FROM users').all();
+
+  const mapping = {};
+  const unmatched = [];
+  for (const c of columns) {
+    const n = norm(c.name);
+    const hits = users.filter((u) => norm(u.display_name) === n || norm(u.username) === n);
+    if (hits.length === 1) mapping[c.name] = hits[0].id;
+    else unmatched.push(c.name);
+  }
+  if (unmatched.length) return { status: 'ambiguous', season_year: year, unmatched };
+
+  const result = importGrid({ csv: text, seasonYear: year, mapping });
+  if (!result.ok) return { status: 'failed', season_year: year, reason: result.error };
+  return { status: 'imported', season_year: year, weeks: result.weeks_created, results: result.results };
+}
+
+module.exports = { preview, importGrid, autoImport, parseCsv, looksLikeGrid, readGrid, BUNDLED };
