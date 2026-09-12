@@ -724,3 +724,11 @@ button.board-section-head .spacer { flex: 1; }
 /* the commissioner's set-once sections live folded under one heading */
 .setup-fold .disclosure-body > .card { margin: 0 0 12px; }
 .setup-fold .disclosure-body > .card:last-child { margin-bottom: 0; }
+
+/* the alternate-line box: a number you can type, sized for one */
+.alt-line-input { display: inline-flex; align-items: baseline; gap: 6px; }
+.alt-line-input input {
+  width: 96px; text-align: right; font-family: var(--mono); font-size: 17px; font-weight: 600;
+  padding: 6px 8px; border-radius: var(--r-xs); border: 1px solid var(--border-strong);
+  background: var(--surface-solid); color: var(--text);
+}

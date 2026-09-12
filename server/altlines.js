@@ -187,11 +187,18 @@ function buildCurve(anchor) {
     };
   }
 
-  // A ladder of alternates around the posted number, at the market's own step.
-  // Rungs no book would price are simply left off, which also gives the slider
-  // its honest travel limits.
-  const step = meta.unit === 'yds' ? 5 : line <= 3 ? 0.5 : 1;
-  const span = meta.unit === 'yds' ? 10 : 6;
+  // A ladder of alternates around the posted number.
+  //
+  // Yardage rungs are every yard, sixty each way, so any .5 line a book might
+  // post is on it — 212.5 has to be able to become 250.5, not just 247.5 or
+  // 252.5. The slider moves `stride` rungs per tick so it stays thumb-sized;
+  // the exact number is typed. Counting markets keep their natural step.
+  // Rungs no book would price are simply left off, which also gives the
+  // slider its honest travel limits.
+  const yards = meta.unit === 'yds';
+  const step = yards ? 1 : line <= 3 ? 0.5 : 1;
+  const span = yards ? 60 : 6;
+  const stride = yards ? 5 : 1;
   const ladder = [];
   for (let i = -span; i <= span; i++) {
     const l = Number((line + i * step).toFixed(1));
@@ -211,6 +218,7 @@ function buildCurve(anchor) {
     sigma: Number(sigma.toFixed(2)),
     hold: Number(hold.toFixed(4)),
     step,
+    stride,
     min_line: ladder.length ? ladder[0].line : line,
     max_line: ladder.length ? ladder[ladder.length - 1].line : line,
     ladder,

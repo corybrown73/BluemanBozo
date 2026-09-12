@@ -528,3 +528,31 @@ test('markets carry a display order so columns lead with yards', () => {
   assert.ok(order('player_anytime_td') < order('player_1st_td'), 'anytime TD comes before first TD');
   assert.ok(order('player_reception_yds') < order('player_anytime_td'), 'receiving yards come before anytime TD');
 });
+
+test('any half-yard line is on the ladder, so 212.5 can become 250.5', () => {
+  const alt = require('../server/altlines');
+  const c = alt.curveFor({ market: 'player_pass_yds', line: 212.5, selection: 'Over', price: -110, opposite_price: -110 });
+  const lines = c.ladder.map((r) => r.line);
+  assert.ok(lines.includes(250.5), '250.5 is a rung');
+  assert.ok(lines.includes(249.5), 'and so is 249.5');
+  assert.ok(lines.includes(212.5), 'the posted line is still there');
+  assert.strictEqual(c.step, 1, 'yardage rungs are every yard');
+  assert.strictEqual(c.stride, 5, 'the slider still moves in fives');
+  assert.ok(c.min_line <= 162.5 && c.max_line >= 262.5, 'reaches fifty yards each way at least');
+  // Contiguous: no interior gaps, or the slider's index maths would lie.
+  for (let i = 1; i < lines.length; i += 1) {
+    assert.ok(Math.abs(lines[i] - lines[i - 1] - 1) < 1e-9, `gap between ${lines[i - 1]} and ${lines[i]}`);
+  }
+  const at250 = c.ladder.find((r) => r.line === 250.5);
+  const posted = c.ladder.find((r) => r.is_posted);
+  assert.ok(at250.price > posted.price, 'a longer over pays more');
+});
+
+test('counting markets keep their own step', () => {
+  const alt = require('../server/altlines');
+  const rec = alt.curveFor({ market: 'player_receptions', line: 5.5, selection: 'Over', price: -120, opposite_price: -100 });
+  assert.strictEqual(rec.step, 1);
+  assert.strictEqual(rec.stride, 1);
+  const tds = alt.curveFor({ market: 'player_pass_tds', line: 1.5, selection: 'Over', price: -130, opposite_price: 105 });
+  assert.strictEqual(tds.step, 0.5);
+});

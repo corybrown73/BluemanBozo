@@ -215,6 +215,7 @@ const S = {
   propFilter: '',
   selectedProp: null,
   curve: null,        // alternate-line ladder for the selected prop
+  curveError: null,   // why there is no ladder, when there should be one
   curveIndex: null,   // which rung of the ladder is chosen
   priceOverride: '',  // real price typed off the picker's own book
   propSource: 'game',   // 'game' = one matchup | 'slate' = every game at once
@@ -1577,17 +1578,29 @@ function confirmPanel() {
       ${raw(
         S.curve
           ? html`
-            <div class="row" style="justify-content:space-between;margin-bottom:2px">
-              <span class="eyebrow">Move the line</span>
-              <span class="mono" style="font-size:17px;font-weight:600">${line}${raw(
-                S.curve.unit ? ` <span class="faint tiny">${esc(S.curve.unit)}</span>` : ''
-              )}</span>
+            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px">
+              <span class="eyebrow">Alternate line</span>
+              <label class="alt-line-input">
+                <input id="lineInput" type="number" inputmode="decimal" step="${raw(S.curve.step)}"
+                       min="${raw(S.curve.ladder[0].line)}" max="${raw(S.curve.ladder[S.curve.ladder.length - 1].line)}"
+                       value="${raw(line)}" aria-label="Type the line you want">
+                ${raw(S.curve.unit ? `<span class="faint tiny">${esc(S.curve.unit)}</span>` : '')}
+              </label>
             </div>
-            <input type="range" id="lineSlider" min="0" max="${raw(S.curve.ladder.length - 1)}"
-                   step="1" value="${raw(S.curveIndex)}" style="width:100%;padding:0"
-                   aria-label="Move the line" aria-valuetext="${raw(esc(line))}${raw(
+            ${raw(
+              // The slider snaps to min + k·step, so anchor min on the posted
+              // rung's residue: the posted line is then always a stop.
+              (() => {
+                const stride = S.curve.stride || 1;
+                const postedIdx = Math.max(0, S.curve.ladder.findIndex((r) => r.is_posted));
+                const min = postedIdx % stride;
+                return html`<input type="range" id="lineSlider" min="${raw(min)}" max="${raw(S.curve.ladder.length - 1)}"
+                   step="${raw(stride)}" value="${raw(S.curveIndex)}" style="width:100%;padding:0"
+                   aria-label="Slide the line" aria-valuetext="${raw(esc(line))}${raw(
                      S.curve.unit ? ' ' + esc(S.curve.unit) : ''
-                   )}">
+                   )}">`;
+              })()
+            )}
             <div class="row tiny faint" style="justify-content:space-between;margin-top:2px">
               <span>${raw(S.curve.ladder[0].line)}</span>
               <span>${raw(slid ? `posted line ${esc(S.curve.posted_line)}` : 'posted line')}</span>
@@ -1602,6 +1615,15 @@ function confirmPanel() {
                 : ''
             )}
 `
+          : ''
+      )}
+
+      ${raw(
+        !S.curve && S.curveError && p.line !== null && p.line !== undefined
+          ? html`<p class="tiny text-warn" style="margin:8px 0 0">
+              Alternate lines unavailable: ${S.curveError}
+              <button type="button" class="btn sm ghost" id="retryCurve" style="margin-left:6px">Try again</button>
+            </p>`
           : ''
       )}
 
@@ -1750,11 +1772,16 @@ async function loadCurve() {
   try {
     const curve = await api('/api/odds/curve?' + params.toString());
     S.curve = curve;
+    S.curveError = null;
     const postedAt = curve.ladder.findIndex((r) => r.is_posted);
     S.curveIndex = postedAt === -1 ? Math.floor(curve.ladder.length / 2) : postedAt;
     render();
-  } catch {
-    S.curve = null; // markets without a line just skip the slider
+  } catch (err) {
+    // A missing slider used to be indistinguishable from a working one on a
+    // market with no line. Say what happened, on the card, so it can be fixed.
+    S.curve = null;
+    S.curveError = err.message || 'could not price alternates';
+    render();
   }
 }
 
@@ -2113,6 +2140,38 @@ function wirePick() {
   );
 
   wireShortlist();
+
+  // Typed line: snap to the nearest rung, ties upward, and say what you got.
+  $('#retryCurve')?.addEventListener('click', () => loadCurve());
+
+  const altLine = $('#lineInput');
+  if (altLine && S.curve) {
+    const commit = () => {
+      const want = Number(altLine.value);
+      if (!Number.isFinite(want)) return;
+      let best = 0;
+      let bestDist = Infinity;
+      S.curve.ladder.forEach((r, i) => {
+        const d = Math.abs(r.line - want);
+        if (d < bestDist - 1e-9 || (Math.abs(d - bestDist) < 1e-9 && r.line > S.curve.ladder[best].line)) {
+          best = i;
+          bestDist = d;
+        }
+      });
+      S.curveIndex = best;
+      S.priceOverride = '';
+      render();
+      const got = S.curve.ladder[best].line;
+      if (Math.abs(got - want) > 1e-9) toast(`Lines are ${esc(String(S.curve.step))}s — went with ${got}.`, 'info', 4000);
+    };
+    altLine.addEventListener('change', commit);
+    altLine.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commit();
+      }
+    });
+  }
 
   const slider = $('#lineSlider');
   if (slider) {
