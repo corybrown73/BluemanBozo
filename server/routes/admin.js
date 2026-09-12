@@ -3,6 +3,7 @@
 const express = require('express');
 const { db, allSettings, setSetting, activeSeason, nflSeasonYear } = require('../db');
 const { requireAdmin, hashPassword, publicUserCols } = require('../auth');
+const history = require('../history');
 const odds = require('../odds');
 const notify = require('../notify');
 const game = require('../game');
@@ -320,6 +321,38 @@ router.get('/roster', async (req, res) => {
     stale: result.stale || false,
     error: result.error || null,
   });
+});
+
+/* ---------------- importing the old spreadsheet ---------------- */
+
+/**
+ * What importing the sheet would do. Reads only — nothing is written until
+ * the commissioner has seen this and confirmed the column mapping.
+ */
+router.post('/history/preview', (req, res) => {
+  const year = parseInt(req.body?.season_year, 10);
+  const result = history.preview({
+    csv: typeof req.body?.csv === 'string' ? req.body.csv : undefined,
+    seasonYear: Number.isFinite(year) ? year : undefined,
+  });
+  res.status(result.ok ? 200 : 400).json(result);
+});
+
+/**
+ * Write it in. `mapping` is column name -> user id, or the string 'create'
+ * for a new account, or 'skip'. Mapping to an ID rather than a name is the
+ * point: someone who has since renamed keeps one career record instead of
+ * gaining a second, empty account.
+ */
+router.post('/history/import', (req, res) => {
+  const year = parseInt(req.body?.season_year, 10);
+  const mapping = req.body?.mapping && typeof req.body.mapping === 'object' ? req.body.mapping : {};
+  const result = history.importGrid({
+    csv: typeof req.body?.csv === 'string' ? req.body.csv : undefined,
+    seasonYear: Number.isFinite(year) ? year : undefined,
+    mapping,
+  });
+  res.status(result.ok ? 200 : 400).json(result);
 });
 
 /** Clear cached odds so the next request refetches. Costs credits next call. */

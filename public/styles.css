@@ -654,3 +654,27 @@ button.board-section-head .sec-caret { color: var(--text-3); font-size: 11px; wi
 button.board-section-head b { font-size: 14.5px; }
 button.board-section-head .spacer { flex: 1; }
 .board-section.shut { margin-bottom: 0; }
+
+/* ---- importing the old spreadsheet (Commissioner) ---- */
+.hist-paste { margin: 10px 0 4px; }
+.hist-paste summary { cursor: pointer; padding: 6px 0; }
+.hist-paste textarea {
+  width: 100%; margin-top: 8px; padding: 10px; border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text);
+  font-family: var(--mono); font-size: 12px; resize: vertical;
+}
+.hist-preview, .hist-result { margin-top: 14px; }
+.hist-rows { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.hist-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.hist-name { display: flex; flex-direction: column; min-width: 96px; }
+.hist-row select {
+  flex: 1; min-width: 160px; min-height: var(--tap); padding: 8px 10px;
+  border-radius: var(--r-sm); border: 1px solid var(--border-strong);
+  background: var(--surface-solid); color: var(--text); font: inherit;
+}
+.hist-flag { flex-basis: 100%; }
+.hist-result { padding: 12px; border: 1px solid var(--green); border-radius: var(--r-sm); background: var(--surface-2); }

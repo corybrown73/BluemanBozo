@@ -209,6 +209,8 @@ const S = {
   propsError: null,
   openSections: new Set(),   // which game sections are expanded
   shameScope: 'all',   // 'season' | 'all'
+  // Importing the old sheet: { year, csv, preview, mapping, result, error }
+  history: null,
   boardNotLoaded: false,
   propFilter: '',
   selectedProp: null,
@@ -2623,6 +2625,8 @@ function viewAdmin() {
 
     ${raw(schedulePanel())}
 
+    ${raw(historyPanel())}
+
     <div class="card">
       <div class="card-head"><h2>Notifications</h2></div>
       <p class="tiny muted">Email: <b>${raw(S.channels.email.configured ? 'ready' : 'not configured')}</b> ·
@@ -2635,6 +2639,118 @@ function viewAdmin() {
       </div>
     </div>
   `;
+}
+
+/* ---------------------------------------------------------------------------
+ * Importing the old spreadsheet.
+ *
+ * The years before this app are the fun part of the Hall of Shame, and they
+ * were sitting in a CSV nobody could run a script against — the app is on a
+ * host with no terminal. This does it from the Commissioner tab, and shows
+ * exactly which account each column lands in before writing anything, because
+ * a column headed "Michael" belonging to someone who now goes by Mike must
+ * join his record, not start a second one.
+ * ------------------------------------------------------------------------- */
+
+function historyPanel() {
+  const h = S.history;
+  return html`<div class="card">
+    <div class="card-head">
+      <h2>Import the old spreadsheet</h2>
+      <div class="spacer"></div>
+      ${raw(h && h.preview && h.preview.already_imported
+        ? html`<span class="badge">${h.preview.already_imported} already in</span>`
+        : '')}
+    </div>
+    <p class="tiny muted">
+      A Hit/Miss grid from the sheet: a Week column, then one column per person.
+      Nothing is written until you have looked at the mapping below.
+    </p>
+
+    <div class="row" style="flex-wrap:wrap">
+      <label class="field" style="max-width:150px"><span>Season</span>
+        <input id="histYear" type="number" min="2000" max="2100" value="${raw(
+          (h && h.year) || new Date().getFullYear() - 1
+        )}"></label>
+      <button class="btn" id="histPreview">${raw(h && h.preview ? 'Re-read the sheet' : 'Read the sheet')}</button>
+    </div>
+
+    <details class="hist-paste"${raw(h && h.csv ? ' open' : '')}>
+      <summary class="tiny faint">Paste a different sheet</summary>
+      <textarea id="histCsv" rows="5" class="mono tiny" placeholder="Week,Cory,Derek,Eric&#10;1,Hit,Miss,Hit">${raw(
+        esc(h && h.csv ? h.csv : '')
+      )}</textarea>
+      <p class="tiny faint">Leave this empty to use the sheet that ships with the app.</p>
+    </details>
+
+    ${raw(h && h.error ? html`<p class="tiny text-warn">${h.error}</p>` : '')}
+
+    ${raw(!h || !h.preview ? '' : historyMapping(h.preview))}
+
+    ${raw(!h || !h.result ? '' : historyResult(h.result))}
+  </div>`;
+}
+
+function historyMapping(p) {
+  const opts = (col) => {
+    const chosen = S.history.mapping[col.name];
+    const sel = chosen === undefined ? (col.suggested_user_id ?? 'create') : chosen;
+    return html`<select data-histmap="${col.name}" aria-label="Which account is the ${col.name} column?">
+      ${raw(p.members.map((m) => html`<option value="${m.id}" ${raw(
+        String(sel) === String(m.id) ? 'selected' : ''
+      )}>${m.avatar} ${m.display_name}</option>`).join(''))}
+      <option value="create" ${raw(sel === 'create' ? 'selected' : '')}>+ new account "${col.name}"</option>
+      <option value="skip" ${raw(sel === 'skip' ? 'selected' : '')}>skip this column</option>
+    </select>`;
+  };
+
+  return html`<div class="hist-preview">
+    <p class="tiny"><b>${p.weeks} weeks</b> in this sheet${raw(
+      p.has_bozo_column ? ', with a Bozo column' : ', no Bozo column — nobody gets crowned for those weeks'
+    )}.</p>
+    ${raw(p.already_imported
+      ? html`<p class="tiny text-warn">The ${p.season_year} season already has ${p.already_imported} results.
+          Importing again will skip anything already there rather than double it.</p>`
+      : '')}
+    <div class="hist-rows">${raw(p.columns.map((c) => html`<div class="hist-row">
+      <div class="hist-name">
+        <b>${c.name}</b>
+        <span class="tiny faint">${c.hit}-${c.miss} · ${raw(Math.round(c.win_pct * 100))}%</span>
+      </div>
+      <span class="tiny faint" aria-hidden="true">→</span>
+      ${raw(opts(c))}
+      ${raw(c.suggested_name && !c.exact
+        ? html`<span class="tiny text-warn hist-flag">looks like ${c.suggested_name} — check this</span>`
+        : '')}
+    </div>`).join(''))}</div>
+    ${raw(p.unreadable.length
+      ? html`<p class="tiny text-warn">${p.unreadable.length} cell${raw(p.unreadable.length === 1 ? '' : 's')} are
+          neither hit nor miss and will be skipped (e.g. ${p.unreadable[0].column} week ${p.unreadable[0].week}:
+          &ldquo;${p.unreadable[0].value}&rdquo;).</p>`
+      : '')}
+    <button class="btn primary" id="histImport">Import ${p.weeks} weeks into ${p.season_year}</button>
+  </div>`;
+}
+
+function historyResult(r) {
+  return html`<div class="hist-result">
+    <p class="tiny"><b>Done.</b> ${r.weeks_created} week${raw(r.weeks_created === 1 ? '' : 's')} and
+      ${r.results} result${raw(r.results === 1 ? '' : 's')} written${raw(
+        r.duplicates ? `, ${esc(r.duplicates)} already there and left alone` : ''
+      )}.</p>
+    ${raw(r.created && r.created.length
+      ? html`<p class="tiny faint">New accounts: ${raw(r.created.map((c) => esc(c.name) + ' (@' + esc(c.username) + ')').join(', '))}
+          — set their passwords under Members.</p>`
+      : '')}
+    ${raw(r.per_person && r.per_person.length
+      ? html`<div class="hist-rows">${raw(r.per_person.map((t) => html`<div class="hist-row">
+          <div class="hist-name"><b>${t.display_name}</b></div>
+          <span class="mono tiny">${t.hit}-${t.miss}</span>
+          <span class="tiny faint">${raw(Math.round(t.win_pct * 100))}%</span>
+        </div>`).join(''))}</div>`
+      : '')}
+    <a class="btn sm" href="#shame">See the Hall of Shame</a>
+  </div>`;
 }
 
 const CRON_PRESETS = {
@@ -2824,7 +2940,89 @@ async function saveSettings(patch, successMsg) {
   }
 }
 
+/** The Commissioner-tab importer for the old spreadsheet. */
+function wireHistoryImport() {
+  const read = (extra = {}) => ({
+    season_year: parseInt($('#histYear')?.value, 10) || undefined,
+    csv: ($('#histCsv')?.value || '').trim() || undefined,
+    ...extra,
+  });
+
+  const preview = $('#histPreview');
+  if (preview) {
+    preview.addEventListener('click', async () => {
+      const body = read();
+      preview.disabled = true;
+      const label = preview.textContent;
+      preview.textContent = 'Reading…';
+      try {
+        const data = await api('/api/admin/history/preview', { method: 'POST', body });
+        // The mapping starts on whatever the preview suggested; every row is
+        // a select the commissioner can change before anything is written.
+        const mapping = {};
+        for (const c of data.columns) mapping[c.name] = c.suggested_user_id ?? 'create';
+        S.history = { year: data.season_year, csv: body.csv || '', preview: data, mapping, result: null, error: null };
+        render();
+      } catch (err) {
+        S.history = { ...(S.history || {}), year: body.season_year, csv: body.csv || '', preview: null, error: err.message };
+        render();
+      } finally {
+        preview.disabled = false;
+        preview.textContent = label;
+      }
+    });
+  }
+
+  $$('[data-histmap]').forEach((sel) =>
+    sel.addEventListener('change', () => {
+      if (!S.history) return;
+      const v = sel.value;
+      S.history.mapping[sel.dataset.histmap] = v === 'create' || v === 'skip' ? v : parseInt(v, 10);
+    })
+  );
+
+  const go = $('#histImport');
+  if (go) {
+    go.addEventListener('click', async () => {
+      if (!S.history) return;
+      const skipped = Object.values(S.history.mapping).filter((v) => v === 'skip').length;
+      const dupes = [...new Set(Object.values(S.history.mapping).filter((v) => typeof v === 'number'))];
+      const numeric = Object.values(S.history.mapping).filter((v) => typeof v === 'number');
+      if (dupes.length !== numeric.length) {
+        toast('Two columns point at the same member. Each person can only be one column.', 'err', 7000);
+        return;
+      }
+      if (!confirm(`Import ${S.history.preview.weeks} weeks into ${S.history.year}?` +
+        (skipped ? ` ${skipped} column(s) will be skipped.` : ''))) return;
+
+      go.disabled = true;
+      go.textContent = 'Importing…';
+      try {
+        const result = await api('/api/admin/history/import', {
+          method: 'POST',
+          body: read({ mapping: S.history.mapping }),
+        });
+        S.history.result = result;
+        S.history.error = null;
+        // The Hall of Shame and the History tab are both now out of date.
+        S.leaderboard = null;
+        S.historyRows = null;
+        toast(`${result.results} results imported.`, 'ok', 6000);
+        render();
+      } catch (err) {
+        S.history.error = err.message;
+        toast(err.message, 'err', 7000);
+        render();
+      } finally {
+        go.disabled = false;
+        go.textContent = 'Import';
+      }
+    });
+  }
+}
+
 function wireAdmin() {
+  wireHistoryImport();
   wireEmptyStateActions();
   $$('[data-status]').forEach((btn) =>
     btn.addEventListener('click', async () => {
