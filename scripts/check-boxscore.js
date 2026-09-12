@@ -122,6 +122,40 @@ async function getJson(url) {
     }
   }
 
+  /* ---------------- first touchdown ---------------- */
+  console.log('\n─'.repeat(64));
+  console.log('\nFirst TD — is the scoring ORDER in the feed?\n');
+  const plays = summary?.scoringPlays;
+  if (!Array.isArray(plays) || !plays.length) {
+    console.log('  ✗ no scoringPlays array. First TD cannot be graded automatically.');
+  } else {
+    console.log(`  ✓ scoringPlays has ${plays.length} entries, in order`);
+    const firstTd = plays.find(
+      (p) => /touchdown/i.test(p.type?.text || '') || /TD/i.test(p.type?.abbreviation || '')
+    );
+    if (!firstTd) {
+      console.log('  ✗ none of them is a touchdown — check a higher-scoring game.');
+    } else {
+      console.log('\n  The first touchdown of the game, as the feed describes it:');
+      console.log(`    type        ${firstTd.type?.abbreviation} — ${firstTd.type?.text}`);
+      console.log(`    team        ${firstTd.team?.displayName || firstTd.team?.abbreviation || '(none)'}`);
+      console.log(`    clock       Q${firstTd.period?.number} ${firstTd.clock?.displayValue || ''}`);
+      console.log(`    text        ${firstTd.text}`);
+      const parts = firstTd.participants || firstTd.athletes;
+      if (Array.isArray(parts) && parts.length) {
+        console.log('    participants:');
+        for (const pt of parts) {
+          console.log(`      ${pt.type || pt.role || '?'} -> ${pt.athlete?.displayName || pt.athlete?.fullName || '?'}`);
+        }
+        console.log('\n  ✓ the scorer is named in structured data — reliable to grade on.');
+      } else {
+        console.log('\n  ! no participants array; the scorer would have to be parsed out of');
+        console.log('    the text above, which is guesswork. Paste this back either way.');
+      }
+      console.log('\n  Raw keys on that play: ' + Object.keys(firstTd).join(', '));
+    }
+  }
+
   console.log('\n─'.repeat(64));
   if (allFound) {
     console.log('\n✅ Every market we offer can be graded from this feed, free.');

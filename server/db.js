@@ -182,8 +182,12 @@ const DEFAULT_SETTINGS = {
   // Commissioner -> Odds API — the app checks the cap against the real plan
   // size and warns when they disagree, and the usage card there reports what
   // a real week cost so the decision comes from a measurement.
+  // What this group actually bets: touchdowns (anytime and first), rushing or
+  // receiving yards, the two combined, and passing TDs. Carries, completions
+  // and attempts are deliberately absent — nobody has ever picked one, and
+  // each market loaded is a credit per game whether it gets used or not.
   odds_markets:
-    'player_pass_yds,player_rush_yds,player_reception_yds,player_receptions,player_anytime_td',
+    'player_anytime_td,player_1st_td,player_rush_yds,player_reception_yds,player_rush_reception_yds,player_pass_tds',
   // Which games the pick board offers. 'week' = through the end of the
   // current football week (Thu-Mon). A number = that many days. 0 = all.
   slate_days: 'week',
