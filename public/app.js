@@ -201,6 +201,7 @@ const S = {
   selectedEvent: null,
   props: null,
   propsLoading: false,
+  propsError: null,
   propFilter: '',
   selectedProp: null,
   curve: null,        // alternate-line ladder for the selected prop
@@ -376,10 +377,19 @@ function pickRow(p, opts = {}) {
   </div>`;
 }
 
-function ticket(parlay, week) {
+/** "Cory's" — but "Chris'" rather than "Chris's". */
+function possessive(name) {
+  const n = String(name || '').trim();
+  if (!n) return '';
+  return /s$/i.test(n) ? `${n}'` : `${n}'s`;
+}
+
+function ticket(parlay, week, payer) {
+  // Whoever is on the hook places this bet, so it carries their name.
+  const owner = payer?.display_name ? `${possessive(payer.display_name)} Ticket` : 'The Ticket';
   if (!parlay) {
     return html`<div class="ticket">
-      <div class="eyebrow">The Ticket</div>
+      <div class="eyebrow">${owner}</div>
       <div class="odds">?????</div>
       <p class="muted tiny" style="margin:8px 0 0">Odds appear once picks lock. No peeking.</p>
     </div>`;
@@ -387,7 +397,7 @@ function ticket(parlay, week) {
   const statusText = { live: 'Live', cashed: 'Cashed', dead: 'Dead', empty: 'No legs yet' }[parlay.status];
   return html`<div class="ticket ${parlay.status}">
     <div class="row">
-      <div class="eyebrow">The Ticket · Week ${week.week_number}</div>
+      <div class="eyebrow">${owner} · Week ${week.week_number}</div>
       <div class="spacer" style="margin-left:auto"></div>
       <span class="badge ${parlay.status === 'cashed' ? 'win' : parlay.status === 'dead' ? 'loss' : 'live'}">${statusText}</span>
     </div>
@@ -568,7 +578,7 @@ function viewWeek() {
               </div>`
         )}
       </div>
-      ${raw(showTicket ? `<div>${ticket(S.week.parlay, w)}</div>` : '')}
+      ${raw(showTicket ? `<div>${ticket(S.week.parlay, w, payer)}</div>` : '')}
     </div>
   </div>`);
 
@@ -656,6 +666,12 @@ function wireEmptyStateActions() {
       if (view === 'shame') S.leaderboard = null;
       if (view === 'history') S.historyRows = null;
       if (view === 'admin') S.adminData = null;
+      if (view === 'pick') {
+        S.props = null;
+        S.propsError = null;
+        S.propSource = 'game';
+        S.eventsState = 'idle';
+      }
       render();
     })
   );
@@ -863,19 +879,11 @@ function viewPick() {
         : ''
     )}
 
-    <div class="card">
-      <div class="card-head">
-        <h2>1 · Pick a game</h2>
-        <div class="spacer"></div>
-        ${raw(S.user.is_admin ? quotaBar() : '')}
-        <button class="btn sm ghost" id="refreshEvents" title="Reload the game list (free — costs no credits)">↻ Refresh</button>
-      </div>
-      ${raw(S.user.is_admin ? '<p class="hint">Browsing games is free. Loading props costs credits.</p>' : '')}
-      ${raw(slateBar())}
-      <div id="eventList" class="grid three">${raw(eventListBody())}</div>
-    </div>
-
-    ${raw(S.selectedEvent || S.propSource === 'slate' || S.slateLoading ? propBoard() : '')}
+    ${raw(
+      S.eventsState === 'error' || (S.eventsState === 'ready' && !S.events.length)
+        ? html`<div class="card">${raw(eventListBody())}</div>`
+        : propBoard()
+    )}
 
     <details class="card disclosure" ${raw(
       // With no board there is nothing else to pick from, so don't hide the
@@ -893,39 +901,6 @@ function viewPick() {
 }
 
 /** The "load everything" control, with the price of the job stated up front. */
-function slateBar() {
-  if (S.eventsState !== 'ready' || !S.events.length) return '';
-  const est = S.slateEstimate;
-
-  if (S.slateLoading) {
-    return html`<div class="card tight accent-edge" style="margin:12px 0 4px">
-      <div class="row"><div class="spinner" style="width:16px;height:16px;margin:0"></div>
-        <span class="tiny">Pulling every game… this takes a few seconds.</span></div>
-    </div>`;
-  }
-
-  const cost = est ? est.estimated_cost : null;
-  const cached = est ? est.games_cached : 0;
-
-  return html`<div class="card tight" style="margin:12px 0 4px">
-    <div class="row">
-      <span style="font-size:20px">🔎</span>
-      <div style="flex:1;min-width:180px">
-        <b class="tiny">Search every game at once</b>
-        <div class="tiny faint">${raw(
-          est
-            ? cost === 0
-              ? `All ${esc(est.games_total)} games already cached — free.`
-              : `${esc(est.games_to_fetch)} of ${esc(est.games_total)} games to fetch · ${esc(cost)} credits` +
-                (cached ? ` (${esc(cached)} already cached)` : '')
-            : 'Type a player name instead of hunting through matchups.'
-        )}</div>
-      </div>
-      <button class="btn sm ${raw(S.propSource === 'slate' ? '' : 'primary')}" id="loadSlate">${raw(S.propSource === 'slate' ? '↻ Reload all games' : '↓ Load all games')}
-      </button>
-    </div>
-  </div>`;
-}
 
 function eventListBody() {
   if (S.eventsState === 'loading' || S.eventsState === 'idle') {
@@ -982,20 +957,15 @@ function eventListBody() {
  * the fifth. Here he is one row, and his passing numbers sit side by side.
  */
 function propBoard() {
-  const ev = S.selectedEvent;
-  if (S.propsLoading || S.slateLoading) {
-    return html`<div class="card"><div class="card-head"><h2>2 · Pick a player prop</h2></div>
-      <div class="empty"><div class="spinner"></div><p class="tiny faint" style="margin-top:10px">Pulling the board…</p></div></div>`;
+  if (S.propsLoading || S.slateLoading || S.eventsState === 'loading' || S.eventsState === 'idle') {
+    return html`<div class="card"><div class="card-head"><h2>Pick a player prop</h2></div>
+      <div class="empty"><div class="spinner"></div>
+        <p class="tiny faint" style="margin-top:10px">Pulling this week's board…</p></div></div>`;
   }
   if (!S.props) {
-    if (!ev) return '';
-    return html`<div class="card">
-      <div class="card-head"><h2>2 · Pick a player prop</h2></div>
-      <div class="empty">
-        <p class="muted">No props loaded for ${esc(ev.away_team)} @ ${esc(ev.home_team)}.</p>
-        <button class="btn primary" id="loadProps">Load the board</button>
-      </div>
-    </div>`;
+    return html`<div class="card">${raw(
+      loadFailed('pick', S.propsError || "The board didn't load.")
+    )}</div>`;
   }
 
   const slate = S.propSource === 'slate';
@@ -1044,7 +1014,7 @@ function propBoard() {
 
   return html`<div class="card board">
     <div class="card-head">
-      <h2>2 · Pick a player prop</h2>
+      <h2>Pick a player prop</h2>
       <span class="badge">${raw(slate ? `${esc(all.length)} props` : `${esc(ev.away_team)} @ ${esc(ev.home_team)}`)}</span>
       <div class="spacer"></div>
       <span class="tiny faint">${cacheNote}</span>
@@ -1116,12 +1086,14 @@ function groupProps(props, groupBy, slate) {
       key = '__all__';
       title = 'All players';
     } else {
-      key = p.event_id || (slate ? p.game_label : 'game');
-      title = p.game_label || (S.selectedEvent ? `${S.selectedEvent.away_team} @ ${S.selectedEvent.home_team}` : 'This game');
+      key = p.event_id || p.game_label || 'game';
+      title = p.game_label || 'This game';
       subtitle = p.commence_time ? fmtKickoff(p.commence_time) : '';
     }
 
-    if (!byKey.has(key)) byKey.set(key, { key, title, subtitle, players: new Map() });
+    if (!byKey.has(key)) {
+      byKey.set(key, { key, title, subtitle, kickoff: Date.parse(p.commence_time) || null, players: new Map() });
+    }
     const section = byKey.get(key);
 
     if (!section.players.has(p.player)) {
@@ -1141,7 +1113,14 @@ function groupProps(props, groupBy, slate) {
       ...sec,
       rows: [...sec.players.values()].sort((a, b) => a.player.localeCompare(b.player)),
     }))
-    .sort((a, b) => a.title.localeCompare(b.title));
+    // Games run in kickoff order — the 1pm slate, then 4pm, then the night
+    // games. Alphabetical put Sunday night between two afternoon kickoffs.
+    .sort((a, b) => {
+      if (groupBy === 'game' && a.kickoff && b.kickoff && a.kickoff !== b.kickoff) {
+        return a.kickoff - b.kickoff;
+      }
+      return a.title.localeCompare(b.title);
+    });
 }
 
 function propSection(section, columns) {
@@ -1216,7 +1195,7 @@ function confirmPanel() {
   const sides = meta?.sides || (p.market_type === 'yesno' ? ['Yes', 'No'] : ['Over', 'Under']);
 
   return html`<div class="card confirm-card">
-    <div class="card-head"><h2>3 · Confirm your pick</h2><div class="spacer"></div>
+    <div class="card-head"><h2>2 · Confirm your pick</h2><div class="spacer"></div>
       <button class="btn sm ghost" id="clearProp">Cancel</button></div>
     <div class="card tight accent-edge" style="margin:0 0 12px">
       <div class="row" style="margin-bottom:${raw(S.curve ? '12px' : '0')}">
@@ -1386,25 +1365,6 @@ async function loadEvents(force = false, { rerender = false } = {}) {
   if (rerender || S.tab === 'pick') render();
 }
 
-async function loadProps(force = false) {
-  if (!S.selectedEvent) return;
-  S.propsLoading = true;
-  S.props = null;
-  S.selectedProp = null;
-  render();
-  try {
-    const data = await api(`/api/odds/events/${S.selectedEvent.id}/props` + (force ? '?force=1' : ''));
-    S.props = data;
-    S.quota = data.quota || S.quota;
-    if (data.error) toast(data.error, 'err', 6000);
-    else if (!data.cached) toast(`Board loaded — ${data.cost} credits used.`, 'info');
-  } catch (err) {
-    toast(err.message, 'err', 7000);
-  } finally {
-    S.propsLoading = false;
-    render();
-  }
-}
 
 /** Client-side mirror of the server's plausibility check, for instant feedback. */
 function checkLine(meta, value) {
@@ -1464,6 +1424,7 @@ async function loadSlateEstimate() {
 }
 
 async function loadSlate(force = false) {
+  S.propsError = null;
   const est = S.slateEstimate;
   if (est && est.estimated_cost > 0) {
     const ok = confirm(
@@ -1515,44 +1476,36 @@ async function submitPick(body) {
   }
 }
 
+/**
+ * Get the board on screen without anyone asking for it.
+ *
+ * Games first (free), then every game's props in one call. The result is
+ * cached server-side for the whole group, so the first person to open the tab
+ * each weekend pays for it and nobody else does.
+ */
+async function autoLoadBoard() {
+  if (S.eventsState === 'idle') await loadEvents(false, { rerender: true });
+  if (S.eventsState !== 'ready' || !S.events.length) return;
+  if (S.slateLoading || S.propSource === 'slate') return;
+  if (S.props && S.props.props?.length) return;
+  loadSlate(false);
+}
+
 function wirePick() {
   wireEmptyStateActions();
-  // The slate is free to fetch, so load it the first time this tab is opened.
-  if (S.eventsState === 'idle') loadEvents(false, { rerender: false });
+
+  // One screen, no buttons to press. The game list is free, and the board for
+  // a Sunday-and-Monday slate is one cached fetch that serves the whole group
+  // all weekend — so there is nothing worth making people opt into.
+  autoLoadBoard();
 
   const retry = $('#retryEvents');
   if (retry) retry.addEventListener('click', () => loadEvents(false, { rerender: true }));
 
-  const slateBtn = $('#loadSlate');
-  if (slateBtn) slateBtn.addEventListener('click', () => loadSlate(false));
-  // Price the job as soon as the games are on screen, so the button can say what it costs.
-  if (S.eventsState === 'ready' && S.events.length && !S.slateEstimate && !S.slateLoading) loadSlateEstimate();
-
-  const refresh = $('#refreshEvents');
-  if (refresh) {
-    refresh.addEventListener('click', async () => {
-      refresh.disabled = true;
-      await loadEvents(S.user.is_admin, { rerender: true });
-    });
-  }
-
-  $$('#eventList [data-event]').forEach((btn) =>
-    btn.addEventListener('click', () => {
-      S.selectedEvent = S.events.find((e) => e.id === btn.dataset.event) || null;
-      S.propSource = 'game';
-      S.props = null;
-      S.selectedProp = null;
-      S.propFilter = '';
-      render();
-      loadProps(false);
-    })
-  );
-
-  const loadBtn = $('#loadProps');
-  if (loadBtn) loadBtn.addEventListener('click', () => loadProps(false));
-
+  // Commissioner-only: bypass the cache and re-price the whole board. Costs
+  // credits, so it stays a deliberate act rather than something automatic.
   const forceBtn = $('#forceProps');
-  if (forceBtn) forceBtn.addEventListener('click', () => loadProps(true));
+  if (forceBtn) forceBtn.addEventListener('click', () => loadSlate(true));
 
   const filter = $('#propFilter');
   if (filter) {
@@ -2254,7 +2207,7 @@ function showWeekModal(detail) {
         ? detail.picks.map((p) => pickRow(p, { bozoUserId: detail.bozo?.user_id })).join('')
         : '<p class="muted tiny">Nobody picked this week.</p>'
     )}
-    ${raw(detail.parlay ? ticket(detail.parlay, w) : '')}
+    ${raw(detail.parlay ? ticket(detail.parlay, w, detail.payer) : '')}
     <div class="row" style="margin-top:14px"><div class="spacer"></div>
       <button class="btn ghost" data-close-modal>Done</button></div>
   `);

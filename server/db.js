@@ -186,7 +186,10 @@ const DEFAULT_SETTINGS = {
   // Which games the pick board offers. 'week' = through the end of the
   // current football week (Thu-Mon). A number = that many days. 0 = all.
   slate_days: 'week',
-  props_cache_minutes: '360',
+  // Which kickoff days the board offers, in Eastern time. The group plays the
+  // Sunday slate and Monday night; Thursday games are not used.
+  slate_weekdays: 'sun,mon',
+  props_cache_minutes: '2880',
   events_cache_minutes: '60',
   monthly_credit_cap: '450',
 
@@ -194,9 +197,9 @@ const DEFAULT_SETTINGS = {
   // (0=Sun ... 2=Tue, 4=Thu, 6=Sat).
   schedule_enabled: '0',
   schedule_timezone: 'America/New_York',
-  cron_open:  '0 9 * * 2',    // Tuesday 9am  - open the week, call for picks
-  cron_mid:   '0 9 * * 4',    // Thursday 9am - line moves, injuries, who's missing
-  cron_final: '0 20 * * 6',   // Saturday 8pm - placement sheet for the bozo
+  cron_open:  '0 12 * * 6',   // Saturday noon - get your bets in, board is live
+  cron_mid:   '',             // off - the group does not play Thursday games
+  cron_final: '0 10 * * 0',   // Sunday 10am - final numbers for whoever is paying
   schedule_channels: 'email',
   auto_open_week: '1',
   injury_feed: '1',

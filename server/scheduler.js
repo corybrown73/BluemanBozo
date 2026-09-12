@@ -22,9 +22,9 @@ const digest = require('./digest');
 const odds = require('./odds');
 
 const JOBS = [
-  { key: 'open',  setting: 'cron_open',  label: 'Tuesday — open the week',   audience: 'group' },
-  { key: 'mid',   setting: 'cron_mid',   label: 'Thursday — midweek update', audience: 'group' },
-  { key: 'final', setting: 'cron_final', label: 'Saturday — placement sheet', audience: 'group' },
+  { key: 'open',  setting: 'cron_open',  label: 'Saturday — get your bets in',  audience: 'group' },
+  { key: 'mid',   setting: 'cron_mid',   label: 'Midweek nudge (off)',          audience: 'group' },
+  { key: 'final', setting: 'cron_final', label: 'Sunday — final numbers',       audience: 'group' },
 ];
 
 // How long after its slot a missed job is still worth running.
@@ -147,7 +147,10 @@ async function runJobInner(job, { dryRun, late }) {
   }
 
   // Thursday only spends credits if explicitly told to.
-  const refresh = jobKey === 'final' || (jobKey === 'mid' && getSetting('mid_refresh_lines') === '1');
+  // Both weekend sends re-price against live numbers: Saturday so the board is
+  // current when people pick, Sunday so the payer places the real thing.
+  const refresh =
+    jobKey === 'final' || jobKey === 'open' || (jobKey === 'mid' && getSetting('mid_refresh_lines') === '1');
   const built = await digest.build(refresh ? jobKey : jobKey === 'mid' ? 'mid' : jobKey, week.id, {
     force: jobKey === 'final',
   });
