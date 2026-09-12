@@ -444,24 +444,46 @@ Or prove it end to end in two minutes: sign in, add a member, redeploy with
 `fly deploy`, then sign in again. If that member is still there, the disk is
 mounted. If they are gone, stop and fix the mount before anyone plays a week.
 
-### Pointing the Namecheap domain at it
+### Pointing bluemanbozo.com at Fly
 
-Your host will give you either a hostname (`bluemanbozo.onrender.com`) or an IP.
+Two halves: Fly has to know about the domain, and the domain has to point at
+Fly. Do them in that order — the certificate cannot issue until the DNS
+records exist, and `fly certs add` is what tells you which records to make.
 
-In Namecheap → **Domain List → Manage → Advanced DNS**, delete the default
-parking records, then add:
+```bash
+fly certs add bluemanbozo.com
+fly certs add www.bluemanbozo.com
+fly ips list                      # the addresses the records point at
+```
+
+Each `certs add` prints exactly what it needs. **Follow that over the table
+below** — on a shared IPv4 Fly also wants an `_acme-challenge` CNAME for
+validation, and it names it precisely for your app.
+
+Then Namecheap → **Domain List → Manage → Advanced DNS**. Delete the default
+parking records first: there is normally a `CNAME www → parkingpage.namecheap.com`
+and a `URL Redirect @`, and they quietly win over anything added alongside
+them. Then:
 
 | Type | Host | Value | TTL |
 |---|---|---|---|
-| `CNAME` | `www` | `your-app.onrender.com` | Automatic |
-| `ALIAS` (or `URL Redirect` to `https://www.bluemanbozo.com`) | `@` | `your-app.onrender.com` | Automatic |
+| `A` | `@` | your v4 from `fly ips list` | Automatic |
+| `AAAA` | `@` | your v6 from `fly ips list` | Automatic |
+| `CNAME` | `www` | `bluemanbozo.fly.dev.` | Automatic |
 
-If your host gives an IP instead, use `A` records pointing at it for both `@` and `www`.
+Plus whatever `_acme-challenge` record `fly certs add` asked for.
 
-Then add `bluemanbozo.com` and `www.bluemanbozo.com` as custom domains in your
-host's dashboard so it provisions the HTTPS certificate. DNS takes 10 minutes to
-a few hours. Finally set `SITE_URL=https://www.bluemanbozo.com` so the links in
-the bozo's email and text point to the right place.
+```bash
+fly certs check bluemanbozo.com
+fly certs check www.bluemanbozo.com
+```
+
+Namecheap usually propagates in 10-30 minutes, occasionally hours. The
+certificate issues on its own once Fly can see the records.
+
+`SITE_URL` in `fly.toml` is already `https://www.bluemanbozo.com`, so the
+links in the digests and the bozo summons point at the real domain rather
+than the `.fly.dev` one.
 
 ---
 
