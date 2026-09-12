@@ -1539,8 +1539,13 @@ function confirmPanel() {
   const meta = S.marketCatalog?.find((m) => m.key === p.market);
   const sides = meta?.sides || (p.market_type === 'yesno' ? ['Yes', 'No'] : ['Over', 'Under']);
 
-  return html`<div class="card confirm-card">
-    <div class="card-head"><h2>Confirm your pick</h2><div class="spacer"></div>
+  // A bottom sheet, not a card under the board: on a full slate the board is
+  // two screens long and the button to actually lock the pick was at the
+  // bottom of all of it. The sheet rides over the board with Lock in pinned
+  // to its foot, the way a bet slip does.
+  return html`<div class="sheet-backdrop" id="sheetBackdrop" aria-hidden="true"></div>
+  <div class="card confirm-card sheet" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" tabindex="-1">
+    <div class="card-head"><h2 id="confirmTitle">Confirm your pick</h2><div class="spacer"></div>
       <button class="btn sm ghost" id="clearProp">Cancel</button></div>
     <div class="card tight accent-edge" style="margin:0 0 12px">
       <div class="row" style="margin-bottom:${raw(S.curve ? '12px' : '0')}">
@@ -1644,12 +1649,14 @@ function confirmPanel() {
 
     <label class="field"><span>Trash talk (optional, shown on the board)</span>
       <input id="trashTalk" maxlength="280" placeholder="Free money. Book it."></label>
-    <button class="btn primary block" id="submitProp" ${raw(finalPrice === null ? 'disabled' : '')}>${raw(
-        finalPrice === null
-          ? 'Set a price to lock this in'
-          : `Lock in ${esc(p.player)} ${esc(p.selection)}${line !== null ? ' ' + esc(line) : ''} (${esc(oddsStr(finalPrice))})`
-      )}
-    </button>
+    <div class="sheet-foot">
+      <button class="btn primary block" id="submitProp" ${raw(finalPrice === null ? 'disabled' : '')}>${raw(
+          finalPrice === null
+            ? 'Set a price to lock this in'
+            : `Lock in ${esc(p.player)} ${esc(p.selection)}${line !== null ? ' ' + esc(line) : ''} (${esc(oddsStr(finalPrice))})`
+        )}
+      </button>
+    </div>
   </div>`;
 }
 
@@ -2143,6 +2150,11 @@ function wirePick() {
 
   // Typed line: snap to the nearest rung, ties upward, and say what you got.
   $('#retryCurve')?.addEventListener('click', () => loadCurve());
+  $('#sheetBackdrop')?.addEventListener('click', () => $('#clearProp')?.click());
+  // On open, nothing is focused (the tapped cell was re-rendered away), so the
+  // sheet takes focus. Mid-interaction the slider keeps it, and we leave it.
+  const sheetEl = $('.confirm-card');
+  if (sheetEl && document.activeElement === document.body) sheetEl.focus({ preventScroll: true });
 
   const altLine = $('#lineInput');
   if (altLine && S.curve) {
@@ -3941,10 +3953,24 @@ function wireShame() {
 const WIRES = { week: wireWeek, pick: wirePick, vote: wireVote, shame: wireShame, history: wireHistory, admin: wireAdmin };
 
 function render() {
+  // The confirm sheet scrolls on its own, and re-renders on every slider
+  // tick. Without this each tick threw it back to the top.
+  const sheetBefore = $('.confirm-card');
+  const sheetScroll = sheetBefore ? sheetBefore.scrollTop : 0;
+
   renderTabs();
   $('#view').innerHTML = VIEWS[S.tab]();
   if (WIRES[S.tab]) WIRES[S.tab]();
+
+  const sheet = $('.confirm-card');
+  if (sheet && sheetScroll) sheet.scrollTop = sheetScroll;
+  document.body.classList.toggle('sheet-open', Boolean(sheet));
 }
+
+// The sheet closes the ways people expect a sheet to close.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('.confirm-card')) $('#clearProp')?.click();
+});
 
 function bootFailed(message) {
   $('#view').innerHTML = html`<div class="card"><div class="empty">

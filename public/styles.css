@@ -732,3 +732,43 @@ button.board-section-head .spacer { flex: 1; }
   padding: 6px 8px; border-radius: var(--r-xs); border: 1px solid var(--border-strong);
   background: var(--surface-solid); color: var(--text);
 }
+
+/* ---- the confirm sheet: a bet slip that rides over the board ----
+   The board is two screens long on a full slate; the button that actually
+   locks the pick lived under all of it. Now it slides up from the bottom
+   with "Lock in" pinned to its foot, wherever you were on the board. */
+.sheet-backdrop {
+  position: fixed; inset: 0; z-index: 40;
+  background: rgba(4, 8, 16, .55);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.confirm-card.sheet {
+  position: fixed; left: 50%; bottom: 0; z-index: 41;
+  width: min(100%, 560px); max-height: min(88vh, 88dvh);
+  transform: translateX(-50%);
+  margin: 0; padding-bottom: 0;
+  overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  border-radius: var(--r) var(--r) 0 0;
+  border-bottom: 0;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg), 0 0 0 3px var(--brand-tint);
+  animation: sheet-up .22s ease-out;
+}
+.confirm-card.sheet:focus { outline: none; }
+/* a grab-handle line, so it reads as a sheet you can dismiss */
+.confirm-card.sheet::before {
+  content: ''; display: block; width: 40px; height: 4px; margin: -8px auto 12px;
+  border-radius: 2px; background: var(--border-strong);
+}
+.sheet-foot {
+  position: sticky; bottom: 0; z-index: 1;
+  margin: 14px -24px 0; padding: 10px 24px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface-solid);
+  border-top: 1px solid var(--border);
+}
+body.sheet-open { overflow: hidden; }
+@keyframes sheet-up { from { transform: translate(-50%, 24px); opacity: .6; } to { transform: translate(-50%, 0); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .confirm-card.sheet { animation: none; } }
+@media (max-width: 600px) {
+  .confirm-card.sheet { width: 100%; }
+}
