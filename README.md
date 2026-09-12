@@ -494,6 +494,36 @@ Phone numbers must be in E.164 format (`+15551234567`). Test both from
 
 ---
 
+## Grading: by hand, or free off ESPN
+
+The Odds API has **no player stats at any tier** — its `/scores` endpoint
+returns game scores only. So auto-grading player props cannot come from there,
+however many credits you buy.
+
+ESPN's public JSON does carry box scores, with no key and no quota, at the
+same undocumented endpoints already used here for injuries and rosters:
+
+```
+https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard
+https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=<id>
+```
+
+There is nothing to sign up for. Check whether it can grade every market we
+offer, against a real finished game:
+
+```bash
+npm run check-boxscore                 # most recent finished games
+npm run check-boxscore -- 20260914     # a specific date, YYYYMMDD
+```
+
+It prints the feed's stat categories and column labels, which markets map onto
+them, and real numbers from a real game — so the mapping is read off the feed
+rather than assumed.
+
+Being undocumented, it can change shape without notice, so anything built on
+it should degrade to manual grading rather than break the week. Entering six
+numbers in Commissioner takes about a minute and always works.
+
 ## Commands
 
 | Command | What it does |
