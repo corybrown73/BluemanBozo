@@ -326,6 +326,28 @@ setInterval(() => { if (document.visibilityState === 'visible') refreshQuietly()
 
 /* ---------------- shared fragments ---------------- */
 
+/**
+ * What a real week actually cost, and what that means for the month. Beats
+ * guessing at a slate: run one week, read this, then decide about the plan.
+ */
+function usageProjection() {
+  const p = S.adminData?.usage?.projection;
+  if (!p || !p.credits_that_week) return '';
+  const verdict =
+    p.fits === null
+      ? ''
+      : p.fits
+      ? `<span class="badge win">fits your ${esc(p.plan_size)} plan</span>`
+      : `<span class="badge loss">over your ${esc(p.plan_size)} plan</span>`;
+  return html`<div class="card tight" style="margin:0 0 14px">
+    <div class="eyebrow">What a week really costs</div>
+    <p class="tiny muted" style="margin:6px 0 0">
+      Week of ${p.basis_week}: <b>${p.credits_that_week}</b> credits.
+      At that rate a month is <b>${p.projected_month}</b>. ${raw(verdict)}
+    </p>
+  </div>`;
+}
+
 function quotaBar() {
   const q = S.quota;
   if (!q) return '';
@@ -2370,7 +2392,8 @@ function viewAdmin() {
           )}
           <label class="field"><span>Monthly credit cap</span>
             <input id="sCap" type="number" min="0" value="${settings.monthly_credit_cap}"></label>
-          <p class="hint">Nothing paid happens past this number. Free plans get 500 a month. Leave a little headroom.</p>
+          <p class="hint">Nothing paid happens past this number. Keep it just under your real plan.</p>
+          ${raw(usageProjection())}
           <label class="field"><span>Props cache (minutes)</span>
             <input id="sCache" type="number" min="1" value="${settings.props_cache_minutes}"></label>
           <p class="hint">Longer cache = fewer credits, staler lines. One fetch serves everybody.</p>

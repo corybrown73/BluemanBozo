@@ -175,12 +175,13 @@ const DEFAULT_SETTINGS = {
   hide_picks_until_lock: '1',
   default_stake_cents: '2000',
   odds_regions: 'us',
-  // Sized for the 500-credit free tier: five markets covering QB, RB and WR/TE
-  // plus anytime TD. At 5 credits a game that is 80 for the entire 16-game
-  // slate, so a weekly full-slate load still lands near 320/month.
-  // On a paid plan, widen this and raise monthly_credit_cap in
-  // Commissioner -> Odds API; the app checks the cap against the real plan size
-  // and warns if they disagree.
+  // Each market costs one credit per game, so the count here multiplies the
+  // whole bill: on a ~15-game Sunday slate, 5 markets is 75 a pull and 8 is
+  // 120. Five fits the 500-credit free tier at roughly 433/month; eight does
+  // not, at roughly 693. Widen this and raise monthly_credit_cap together in
+  // Commissioner -> Odds API — the app checks the cap against the real plan
+  // size and warns when they disagree, and the usage card there reports what
+  // a real week cost so the decision comes from a measurement.
   odds_markets:
     'player_pass_yds,player_rush_yds,player_reception_yds,player_receptions,player_anytime_td',
   // Which games the pick board offers. 'week' = through the end of the

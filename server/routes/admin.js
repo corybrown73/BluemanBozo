@@ -173,7 +173,37 @@ router.get('/usage', (req, res) => {
     )
     .all();
   const recent = db.prepare('SELECT * FROM api_usage ORDER BY id DESC LIMIT 25').all();
-  res.json({ quota: odds.quotaStatus(), by_endpoint: rows, recent });
+
+  // Credits per football week, so one real week can be measured and the month
+  // projected from it — rather than guessing what a slate costs.
+  const byWeek = db
+    .prepare(
+      `SELECT strftime('%Y-W%W', created_at) AS week,
+              MIN(date(created_at)) AS starting,
+              SUM(credits) AS credits,
+              COUNT(*) AS calls
+       FROM api_usage
+       WHERE credits > 0
+       GROUP BY week
+       ORDER BY week DESC
+       LIMIT 8`
+    )
+    .all();
+
+  // Project from the most recent COMPLETE week, not a half-finished one.
+  const quota = odds.quotaStatus();
+  const basis = byWeek.find((w) => w.credits > 0) || null;
+  const projection = basis
+    ? {
+        basis_week: basis.starting,
+        credits_that_week: basis.credits,
+        projected_month: Math.round(basis.credits * 4.33),
+        plan_size: quota.plan_size,
+        fits: quota.plan_size ? Math.round(basis.credits * 4.33) <= quota.plan_size : null,
+      }
+    : null;
+
+  res.json({ quota, by_endpoint: rows, by_week: byWeek, projection, recent });
 });
 
 router.get('/notifications', (req, res) => {

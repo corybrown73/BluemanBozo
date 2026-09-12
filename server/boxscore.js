@@ -25,17 +25,55 @@ const { normalizeName } = require('./injuries');
 const BASE = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl';
 const CACHE_MINUTES = 60;
 
-/** market -> which category and column to read. */
+/**
+ * market -> which category and column to read, from the labels ESPN actually
+ * returns (confirmed via `npm run check-boxscore`):
+ *
+ *   passing        C/ATT  YDS  AVG  TD  INT  SACKS  QBR  RTG
+ *   rushing        CAR    YDS  AVG  TD  LONG
+ *   receiving      REC    YDS  AVG  TD  LONG  TGTS
+ *   defensive      TOT    SOLO SACKS TFL PD  QB HTS  TD
+ *   kicking        FG     PCT  LONG XP  PTS
+ *
+ * Entries with several specs are summed — a touchdown counts whether it was
+ * run in or caught.
+ */
 const STAT_MAP = {
   player_pass_yds: [{ category: 'passing', label: 'YDS' }],
+  player_pass_tds: [{ category: 'passing', label: 'TD' }],
+  player_pass_interceptions: [{ category: 'passing', label: 'INT' }],
+  // ESPN reports completions and attempts as one "23/33" cell.
+  player_pass_completions: [{ category: 'passing', label: 'C/ATT', part: 0 }],
+  player_pass_attempts: [{ category: 'passing', label: 'C/ATT', part: 1 }],
+
   player_rush_yds: [{ category: 'rushing', label: 'YDS' }],
+  player_rush_attempts: [{ category: 'rushing', label: 'CAR' }],
+
   player_reception_yds: [{ category: 'receiving', label: 'YDS' }],
   player_receptions: [{ category: 'receiving', label: 'REC' }],
+
+  player_rush_reception_yds: [
+    { category: 'rushing', label: 'YDS' },
+    { category: 'receiving', label: 'YDS' },
+  ],
   // Scoring a touchdown is rushing OR receiving, so the two are summed.
   player_anytime_td: [
     { category: 'rushing', label: 'TD' },
     { category: 'receiving', label: 'TD' },
   ],
+
+  player_kicking_points: [{ category: 'kicking', label: 'PTS' }],
+  player_tackles_assists: [{ category: 'defensive', label: 'TOT' }],
+  player_sacks: [{ category: 'defensive', label: 'SACKS' }],
+};
+
+/**
+ * Markets a box score cannot settle. First TD scorer needs the order goals
+ * were scored in, which is play-by-play, not a box score. Saying so is better
+ * than reading "1 rushing TD" and calling it first.
+ */
+const UNGRADEABLE = {
+  player_1st_td: 'First TD needs the scoring order, which a box score does not carry.',
 };
 
 /* ---------------- fetching, with the same cache the other feeds use ---------------- */
@@ -126,10 +164,12 @@ function playersFromSummary(sum) {
         const name = a.athlete?.displayName || a.athlete?.fullName;
         if (!name) continue;
         const key = normalizeName(name);
-        if (!out.has(key)) out.set(key, { name, stats: {} });
+        if (!out.has(key)) out.set(key, { name, stats: {}, raw: {} });
         const entry = out.get(key);
         labels.forEach((label, i) => {
-          const v = num(a.stats?.[i]);
+          const raw = a.stats?.[i];
+          entry.raw[`${cat.name}.${label}`] = raw;
+          const v = num(raw);
           if (v !== null) entry.stats[`${cat.name}.${label}`] = v;
         });
       }
@@ -143,8 +183,17 @@ function readStat(market, playerEntry) {
   const spec = STAT_MAP[market];
   if (!spec || !playerEntry) return null;
   let total = null;
-  for (const { category, label } of spec) {
-    const v = playerEntry.stats[`${category}.${label}`];
+  for (const { category, label, part } of spec) {
+    const key = `${category}.${label}`;
+    let v;
+    if (part === undefined) {
+      v = playerEntry.stats[key];
+    } else {
+      // A combined cell like "23/33" — completions then attempts.
+      const piece = String(playerEntry.raw?.[key] ?? '').split('/')[part];
+      v = num(piece);
+      if (v === null) v = undefined;
+    }
     if (v === undefined) continue;
     total = (total ?? 0) + v;
   }
@@ -234,6 +283,11 @@ async function statsForPicks(picks, { force = false } = {}) {
       continue;
     }
 
+    if (UNGRADEABLE[pick.market]) {
+      unresolved.push({ pick_id: pick.id, player: pick.player, reason: UNGRADEABLE[pick.market] });
+      continue;
+    }
+
     const value = readStat(pick.market, entry);
     if (value === null) {
       unresolved.push({
@@ -260,6 +314,7 @@ async function statsForPicks(picks, { force = false } = {}) {
 
 module.exports = {
   statsForPicks,
+  UNGRADEABLE,
   playersFromSummary,
   readStat,
   matchEvent,

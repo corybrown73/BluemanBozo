@@ -123,3 +123,60 @@ test('a malformed or empty feed yields nothing rather than throwing', () => {
   assert.strictEqual(box.readStat('player_pass_yds', null), null);
   assert.strictEqual(box.readStat('nonsense_market', { stats: {} }), null);
 });
+
+/* ---------------- the wider market list ---------------- */
+
+const WIDE = {
+  boxscore: { players: [{
+    team: { abbreviation: 'KC' },
+    statistics: [
+      { name: 'passing', labels: ['C/ATT', 'YDS', 'AVG', 'TD', 'INT', 'SACKS', 'QBR', 'RTG'],
+        athletes: [{ athlete: { displayName: 'Patrick Mahomes' }, stats: ['23/33', '262', '7.9', '3', '1', '2', '78.1', '104.2'] }] },
+      { name: 'rushing', labels: ['CAR', 'YDS', 'AVG', 'TD', 'LONG'],
+        athletes: [{ athlete: { displayName: 'Isiah Pacheco' }, stats: ['17', '84', '4.9', '1', '21'] }] },
+      { name: 'receiving', labels: ['REC', 'YDS', 'AVG', 'TD', 'LONG', 'TGTS'],
+        athletes: [{ athlete: { displayName: 'Isiah Pacheco' }, stats: ['3', '26', '8.7', '0', '12', '4'] }] },
+      { name: 'kicking', labels: ['FG', 'PCT', 'LONG', 'XP', 'PTS'],
+        athletes: [{ athlete: { displayName: 'Harrison Butker' }, stats: ['2/2', '100.0', '48', '3/3', '9'] }] },
+      { name: 'defensive', labels: ['TOT', 'SOLO', 'SACKS', 'TFL', 'PD', 'QB HTS', 'TD'],
+        athletes: [{ athlete: { displayName: 'Nick Bolton' }, stats: ['11', '7', '1.5', '2', '1', '3', '0'] }] },
+    ],
+  }] },
+};
+
+test('every market the group can pick is gradeable, or says why not', () => {
+  const p = box.playersFromSummary(WIDE);
+  const mahomes = p.get('patrick mahomes');
+  const pacheco = p.get('isiah pacheco');
+
+  assert.strictEqual(box.readStat('player_pass_yds', mahomes), 262);
+  assert.strictEqual(box.readStat('player_pass_tds', mahomes), 3);
+  assert.strictEqual(box.readStat('player_pass_interceptions', mahomes), 1);
+  assert.strictEqual(box.readStat('player_rush_attempts', pacheco), 17);
+  assert.strictEqual(box.readStat('player_kicking_points', p.get('harrison butker')), 9);
+  assert.strictEqual(box.readStat('player_tackles_assists', p.get('nick bolton')), 11);
+  assert.strictEqual(box.readStat('player_sacks', p.get('nick bolton')), 1.5, 'half sacks are real');
+
+  // Rush + Rec yards sums two categories for the same player.
+  assert.strictEqual(box.readStat('player_rush_reception_yds', pacheco), 110, '84 rushing + 26 receiving');
+
+  // First TD cannot come from a box score, and is declared rather than faked.
+  assert.ok(box.UNGRADEABLE.player_1st_td, 'first TD is flagged ungradeable');
+  assert.strictEqual(box.STAT_MAP.player_1st_td, undefined, 'and has no mapping to accidentally use');
+});
+
+test('completions and attempts are split out of the single C/ATT cell', () => {
+  // ESPN reports "23/33". Reading it whole gives 23 for both, or NaN.
+  const mahomes = box.playersFromSummary(WIDE).get('patrick mahomes');
+  assert.strictEqual(box.readStat('player_pass_completions', mahomes), 23);
+  assert.strictEqual(box.readStat('player_pass_attempts', mahomes), 33);
+});
+
+test('no market we offer is silently unmapped', () => {
+  const odds = require('../server/odds');
+  const missing = odds.MARKETS
+    .map((m) => m.key)
+    .filter((k) => !box.STAT_MAP[k] && !box.UNGRADEABLE[k]);
+  assert.deepStrictEqual(missing, [],
+    `these markets can be picked but not graded: ${missing.join(', ')}`);
+});
