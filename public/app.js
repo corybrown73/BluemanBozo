@@ -2534,6 +2534,7 @@ function gradePanel() {
         .join('')
     )}
     <div class="row" style="margin-top:12px">
+      <button class="btn" id="pullStats">Pull stats from ESPN</button>
       <button class="btn primary" id="saveGrades">Grade the week</button>
       <span class="tiny faint">Leave a box blank to keep it pending. All settled → voting opens.</span>
     </div>
@@ -2639,6 +2640,38 @@ function wireAdmin() {
         render();
       } catch (err) {
         toast(err.message, 'err');
+      }
+    });
+  }
+
+  // Fills the boxes from the box scores. Deliberately does not save — the
+  // numbers land on screen and the commissioner decides.
+  const pullStats = $('#pullStats');
+  if (pullStats) {
+    pullStats.addEventListener('click', async () => {
+      pullStats.disabled = true;
+      const label = pullStats.textContent;
+      pullStats.textContent = 'Reading box scores…';
+      try {
+        const out = await api(`/api/weeks/${S.week.week.id}/stats`, { method: 'POST' });
+        let filled = 0;
+        for (const r of out.results || []) {
+          const input = $(`.statline[data-pick="${r.pick_id}"]`);
+          if (input) {
+            input.value = r.actual_value;
+            filled += 1;
+          }
+        }
+        if (filled) toast(`Filled ${filled} of ${out.checked}. Check them, then grade.`, 'ok', 6000);
+        else toast('Nothing to fill yet.', 'info', 6000);
+        for (const u of out.unresolved || []) {
+          toast(`${u.player}: ${u.reason}`, 'err', 9000);
+        }
+      } catch (err) {
+        toast(err.message, 'err', 8000);
+      } finally {
+        pullStats.disabled = false;
+        pullStats.textContent = label;
       }
     });
   }

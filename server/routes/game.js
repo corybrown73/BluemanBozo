@@ -251,6 +251,25 @@ router.delete('/picks/:id', (req, res) => {
 });
 
 /** Enter the real stat lines. Results are computed, never hand-typed. */
+// Pull the real numbers from ESPN and hand them back for review. It fills the
+// boxes; the commissioner still presses Grade. An undocumented feed does not
+// get to settle a bet on its own.
+router.post('/weeks/:id/stats', requireAdmin, async (req, res) => {
+  const week = game.getWeek(parseInt(req.params.id, 10));
+  if (!week) return res.status(404).json({ error: 'Week not found.' });
+
+  const picks = game.rawPicks(week.id);
+  if (!picks.length) return res.json({ results: [], unresolved: [], checked: 0 });
+
+  try {
+    const out = await require('../boxscore').statsForPicks(picks, { force: req.query.force === '1' });
+    if (out.error) return res.status(502).json({ error: out.error });
+    res.json(out);
+  } catch (err) {
+    res.status(502).json({ error: `Could not read the box scores: ${err.message}` });
+  }
+});
+
 router.post('/weeks/:id/grade', requireAdmin, (req, res) => {
   const week = game.getWeek(parseInt(req.params.id, 10));
   if (!week) return res.status(404).json({ error: 'Week not found.' });

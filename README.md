@@ -518,7 +518,26 @@ npm run check-boxscore -- 20260914     # a specific date, YYYYMMDD
 
 It prints the feed's stat categories and column labels, which markets map onto
 them, and real numbers from a real game — so the mapping is read off the feed
-rather than assumed.
+rather than assumed. Confirmed against New England at Seattle:
+
+| market | reads |
+|---|---|
+| Passing Yards | `passing.YDS` |
+| Rushing Yards | `rushing.YDS` |
+| Receiving Yards | `receiving.YDS` |
+| Receptions | `receiving.REC` |
+| Anytime TD | `rushing.TD` + `receiving.TD` |
+
+### Grading a week
+
+**Commissioner → Enter the stat lines → Pull stats from ESPN.** It fills the
+boxes and stops. You read the numbers, then press **Grade the week**. The feed
+is undocumented, so it does not get to settle a bet unwatched.
+
+Anything it cannot resolve is named rather than guessed — most often a player
+who never appeared in the box score, which usually means inactive. A
+sportsbook voids that bet; settling it at zero would hand someone a loss for a
+game they never played in. Type those in by hand, or leave them pending.
 
 Being undocumented, it can change shape without notice, so anything built on
 it should degrade to manual grading rather than break the week. Entering six
