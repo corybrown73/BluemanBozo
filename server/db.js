@@ -176,12 +176,14 @@ const DEFAULT_SETTINGS = {
   default_stake_cents: '2000',
   odds_regions: 'us',
   // Each market costs one credit per game, so the count here multiplies the
-  // whole bill: on a ~15-game Sunday slate, 5 markets is 75 a pull and 8 is
-  // 120. Five fits the 500-credit free tier at roughly 433/month; eight does
-  // not, at roughly 693. Widen this and raise monthly_credit_cap together in
-  // Commissioner -> Odds API — the app checks the cap against the real plan
-  // size and warns when they disagree, and the usage card there reports what
-  // a real week cost so the decision comes from a measurement.
+  // whole bill: on a ~15-game Sunday slate, 6 markets is 90 a pull. The
+  // defaults below assume the 20,000-credit plan. On the free 500 tier, drop
+  // to five markets and set monthly_credit_cap to 450 — the app reads the
+  // real plan size from the provider's headers and warns when the cap and the
+  // plan disagree, and the usage card reports what a real week cost.
+  //
+  // These are DEFAULTS for a fresh database. An existing deployment keeps
+  // whatever is in its settings table; change those in Commissioner -> Odds API.
   // What this group actually bets: touchdowns (anytime and first), rushing or
   // receiving yards, the two combined, and passing TDs. Carries, completions
   // and attempts are deliberately absent — nobody has ever picked one, and
@@ -194,9 +196,9 @@ const DEFAULT_SETTINGS = {
   // Which kickoff days the board offers, in Eastern time. The group plays the
   // Sunday slate and Monday night; Thursday games are not used.
   slate_weekdays: 'sun,mon',
-  props_cache_minutes: '2880',
+  props_cache_minutes: '120',
   events_cache_minutes: '60',
-  monthly_credit_cap: '450',
+  monthly_credit_cap: '18000',
 
   // Weekly rhythm. Times are in schedule_timezone, cron format: min hour * * dow
   // (0=Sun ... 2=Tue, 4=Thu, 6=Sat).
