@@ -985,6 +985,27 @@ function eventListBody() {
  * meant Josh Allen appeared six times and you scrolled past four of him to find
  * the fifth. Here he is one row, and his passing numbers sit side by side.
  */
+/**
+ * "Refreshed 12 minutes ago by Derek · 2 left" plus the button.
+ *
+ * One person's refresh updates the board for everyone, so the attribution is
+ * the useful half: it stops two people spending a pull on the same numbers.
+ */
+function refreshControl() {
+  const r = S.props?.refresh;
+  if (!r) return '';
+  const last = r.last
+    ? r.last.age_minutes < 1
+      ? 'just now'
+      : `${r.last.age_minutes}m ago`
+    : 'not yet';
+  const who = r.last ? (r.last.scheduled ? ' · auto' : ` · ${esc(r.last.by || '')}`) : '';
+  const left = r.unlimited ? '' : ` · ${r.left} left`;
+  return html`<span class="tiny faint refresh-meta">${raw(last)}${raw(who)}${raw(left)}</span>
+    <button class="btn sm ghost" id="refreshBoard" ${raw(r.can ? '' : 'disabled')}
+      title="${raw(r.can ? 'Pull fresh numbers for everyone' : esc(r.reason || ''))}">↻ Refresh</button>`;
+}
+
 function propBoard() {
   if (S.propsLoading || S.slateLoading || S.eventsState === 'loading' || S.eventsState === 'idle') {
     return html`<div class="card"><div class="card-head"><h2>Pick a player prop</h2></div>
@@ -1076,7 +1097,7 @@ function propBoard() {
       <span class="badge">${raw(slate ? `${esc(all.length)} props` : `${esc(ev.away_team)} @ ${esc(ev.home_team)}`)}</span>
       <div class="spacer"></div>
       <span class="tiny faint">${cacheNote}</span>
-      ${raw(!slate && S.user.is_admin ? '<button class="btn sm ghost" id="forceProps" title="Bypass the cache — costs credits">Refresh</button>' : '')}
+      ${raw(refreshControl())}
     </div>
 
     <div class="pill-row" role="group" aria-label="Prop category">
@@ -1574,10 +1595,45 @@ function wirePick() {
   const retry = $('#retryEvents');
   if (retry) retry.addEventListener('click', () => loadEvents(false, { rerender: true }));
 
-  // Commissioner-only: bypass the cache and re-price the whole board. Costs
-  // credits, so it stays a deliberate act rather than something automatic.
-  const forceBtn = $('#forceProps');
-  if (forceBtn) forceBtn.addEventListener('click', () => loadSlate(true, { confirmCost: true }));
+  // Anyone can pull fresh numbers, out of their own weekly allowance. It
+  // updates the board for the whole group, which is the point.
+  const refreshBtn = $('#refreshBoard');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      refreshBtn.disabled = true;
+      const label = refreshBtn.textContent;
+      refreshBtn.textContent = 'Pulling…';
+      try {
+        const data = await api('/api/odds/refresh', { method: 'POST' });
+        S.props = data;
+        S.quota = data.quota || S.quota;
+        if (data.stale) {
+          // Tapping refresh and being told "already current" when the pull
+          // actually failed is worse than being told nothing.
+          toast(
+            `Couldn't reach the odds feed — these are the last numbers we have. Your refresh wasn't used.`,
+            'err',
+            8000
+          );
+        } else {
+          toast(
+            data.cost === 0
+              ? 'Already current — that one was free.'
+              : `Fresh numbers for everyone.${
+                  data.refresh?.unlimited ? '' : ` ${data.refresh.left} refresh${data.refresh.left === 1 ? '' : 'es'} left this week.`
+                }`,
+            'ok',
+            6000
+          );
+        }
+        render();
+      } catch (err) {
+        toast(err.message, 'err', 7000);
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = label;
+      }
+    });
+  }
 
   const pullBoard = $('#pullBoard');
   if (pullBoard) {

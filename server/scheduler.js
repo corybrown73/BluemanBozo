@@ -160,6 +160,12 @@ async function runJobInner(job, { dryRun, late }) {
   const results = await digest.send(built, { audience: job.audience });
   const delivered = results.filter((r) => r.ok).length;
 
+  // A scheduled pull is a refresh too — the board should say so rather than
+  // still crediting whoever last tapped the button.
+  if (refresh && built.credits) {
+    require('./refresh').record(week.id, null, { source: 'scheduled', credits: built.credits });
+  }
+
   recordRun(jobKey, {
     week_id: week.id,
     status: 'sent',

@@ -601,6 +601,11 @@ async function getSlateProps({ markets, force = false, onlyEventIds = null, cach
   const props = [];
   const loaded = [];
   const failures = [];
+  // A game that falls back to its old cache because the provider was
+  // unreachable costs nothing and throws nothing — indistinguishable from a
+  // cache hit unless we count it. Telling someone their refresh was "already
+  // current" when it actually failed is the worst of both.
+  const staleGames = [];
   let cost = 0;
 
   // Sequential on purpose: the provider rate-limits, and a partial board with a
@@ -609,6 +614,7 @@ async function getSlateProps({ markets, force = false, onlyEventIds = null, cach
     try {
       const res = await getEventProps(ev.id, { markets, force, cacheOnly });
       cost += res.cost || 0;
+      if (res.stale && res.error) staleGames.push({ game: `${ev.away_team} @ ${ev.home_team}`, error: res.error });
       const label = `${ev.away_team} @ ${ev.home_team}`;
       loaded.push({ ...ev, prop_count: res.props.length, cached: res.cached });
       for (const p of res.props) {
@@ -641,7 +647,15 @@ async function getSlateProps({ markets, force = false, onlyEventIds = null, cach
     throw new OddsApiError('NOT_LOADED', 409);
   }
 
-  return { games: loaded, props, cost, failures, estimate, quota: quotaStatus() };
+  return {
+    games: loaded,
+    props,
+    cost,
+    failures,
+    estimate,
+    quota: quotaStatus(),
+    stale: staleGames.length ? { count: staleGames.length, of: games.length, error: staleGames[0].error } : null,
+  };
 }
 
 /** Final scores, used to nudge admins that games are done. Costs 1-2 credits. */

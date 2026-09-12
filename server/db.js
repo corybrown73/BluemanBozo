@@ -154,6 +154,19 @@ CREATE TABLE IF NOT EXISTS job_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs(job, created_at);
 
+-- Who pulled fresh lines, and when. One person's refresh updates the board for
+-- everyone, so this is both a per-member quota and the attribution the board
+-- shows: "refreshed 12 minutes ago by Derek".
+CREATE TABLE IF NOT EXISTS board_refreshes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  week_id     INTEGER REFERENCES weeks(id) ON DELETE CASCADE,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  source      TEXT NOT NULL DEFAULT 'member',   -- 'member' | 'scheduled'
+  credits     INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_refresh_week ON board_refreshes (week_id, user_id);
+
 CREATE TABLE IF NOT EXISTS api_usage (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   endpoint    TEXT NOT NULL,
@@ -199,6 +212,14 @@ const DEFAULT_SETTINGS = {
   props_cache_minutes: '120',
   events_cache_minutes: '60',
   monthly_credit_cap: '18000',
+  // Everyone gets a couple of pulls a week of their own. One person's refresh
+  // updates the board for the whole group, so these are cheap in practice and
+  // they happen when somebody actually wants new numbers.
+  refreshes_per_member: '2',
+  // A refresh this soon after the last one is served from cache and does not
+  // count — two people tapping within a minute of each other should not cost
+  // two pulls.
+  refresh_min_gap_minutes: '10',
 
   // Weekly rhythm. Times are in schedule_timezone, cron format: min hour * * dow
   // (0=Sun ... 2=Tue, 4=Thu, 6=Sat).

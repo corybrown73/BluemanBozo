@@ -5,6 +5,8 @@ const odds = require('../odds');
 const altlines = require('../altlines');
 const roster = require('../roster');
 const { requireAuth, requireAdmin } = require('../auth');
+const refresh = require('../refresh');
+const { currentWeek } = require('../db');
 const { getSetting } = require('../db');
 
 const router = express.Router();
@@ -77,7 +79,13 @@ router.get('/slate', async (req, res) => {
     const force = req.query.force === '1' && req.user.is_admin;
     const result = await odds.getSlateProps({ markets, force, cacheOnly: !req.user.is_admin });
     const tagged = await roster.tagProps(result.props);
-    res.json({ ...result, roster_available: tagged.roster_available, quota: odds.quotaStatus() });
+    const wk = currentWeek();
+    res.json({
+      ...result,
+      roster_available: tagged.roster_available,
+      quota: odds.quotaStatus(),
+      refresh: refresh.status(wk?.id, req.user),
+    });
   } catch (err) {
     if (err.message === 'NOT_LOADED') {
       return res.status(409).json({
@@ -85,6 +93,39 @@ router.get('/slate', async (req, res) => {
         not_loaded: true,
       });
     }
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+/**
+ * Pull fresh lines on demand, out of the asker's own weekly allowance.
+ *
+ * The board is shared, so this updates it for everybody — which is the point.
+ * The commissioner is not metered; they are the one watching the bill.
+ */
+router.post('/refresh', async (req, res) => {
+  const wk = currentWeek();
+  const before = refresh.status(wk?.id, req.user);
+  if (!before.can) {
+    return res.status(429).json({ error: before.reason, refresh: before });
+  }
+
+  try {
+    const result = await odds.getSlateProps({ markets: requestedMarkets(req), force: true });
+    // Only bill the allowance for a pull that actually cost something. A
+    // cache hit is not worth one of somebody's two — and neither is a pull
+    // that fell back to old numbers because the provider was down.
+    if (result.cost > 0) {
+      refresh.record(wk.id, req.user.id, { source: 'member', credits: result.cost });
+    }
+    const tagged = await roster.tagProps(result.props);
+    res.json({
+      ...result,
+      roster_available: tagged.roster_available,
+      quota: odds.quotaStatus(),
+      refresh: refresh.status(wk.id, req.user),
+    });
+  } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });

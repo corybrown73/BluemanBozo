@@ -624,3 +624,6 @@ button.rowbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-r
 .badge.gold { background: var(--gold-tint); color: var(--gold); border-color: transparent; }
 .pickrow.is-bozo { border-color: var(--gold); background: var(--gold-tint); }
 .payline-av { filter: drop-shadow(0 0 10px var(--brand-tint)); }
+
+/* The board's freshness line, next to the refresh button. */
+.refresh-meta { white-space: nowrap; font-variant-numeric: tabular-nums; }
