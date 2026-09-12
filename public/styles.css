@@ -532,6 +532,18 @@ button.rowbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-r
 .pill:hover { color: var(--text); border-color: var(--text-3); }
 .pill.active { background: var(--brand-fill); border-color: var(--brand-fill); color: var(--on-brand); }
 
+/* While a search is running each pill carries its own hit count, so a name
+   that lives under another category is visible instead of reading as none. */
+.pill-n {
+  display: inline-block; margin-left: 7px; padding: 1px 7px; border-radius: var(--r-pill);
+  background: var(--border); color: var(--text-2); font-size: 12px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pill.active .pill-n { background: rgba(255, 255, 255, .22); color: var(--on-brand); }
+.pill.dim { opacity: .45; }
+.pill.dim:hover { opacity: .7; }
+.pill-row.center { justify-content: center; padding-bottom: 2px; }
+
 /* group-by / side switches + search */
 .board-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
 .seg { display: inline-flex; padding: 3px; border-radius: var(--r-pill); background: var(--surface-2); border: 1px solid var(--border); gap: 2px; }
@@ -627,3 +639,18 @@ button.rowbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-r
 
 /* The board's freshness line, next to the refresh button. */
 .refresh-meta { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* Collapsible game sections. A shut one is a row you tap, so it gets a real
+   tap target and reads as a control rather than a heading. */
+button.board-section-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  min-height: var(--tap); padding: 10px 4px; margin: 0;
+  background: none; border: 0; border-bottom: 1px solid var(--border);
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+button.board-section-head:hover { border-bottom-color: var(--border-strong); }
+button.board-section-head:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-ring); border-radius: var(--r-xs); }
+button.board-section-head .sec-caret { color: var(--text-3); font-size: 11px; width: 12px; flex: none; }
+button.board-section-head b { font-size: 14.5px; }
+button.board-section-head .spacer { flex: 1; }
+.board-section.shut { margin-bottom: 0; }

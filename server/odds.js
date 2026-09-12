@@ -49,7 +49,10 @@ const MARKETS = [
   { key: 'player_1st_td',             label: 'First TD Scorer',   unit: 'TDs',   type: 'yesno', group: 'Touchdowns', sides: ['Yes', 'No'],     short: 'First TD', plausible: null },
 ];
 
-const MARKET_BY_KEY = new Map(MARKETS.map((m) => [m.key, m]));
+// The order above is the order the board reads in: the volume stat first
+// (yards), then what people do with it. Columns follow it rather than the
+// alphabet, which used to put "Anytime" and "Att" ahead of "Yards".
+const MARKET_BY_KEY = new Map(MARKETS.map((m, i) => [m.key, { ...m, order: i }]));
 
 function marketMeta(key) {
   return (
@@ -61,8 +64,65 @@ function marketMeta(key) {
       group: 'Other',
       sides: ['Over', 'Under'],
       plausible: null,
+      order: 99,
     }
   );
+}
+
+/**
+ * Anytime TD and First TD are one market for everyone, but they do not mean
+ * one thing. Aaron Rodgers at +1900 is a quarterback keeping it himself on the
+ * goal line; Travis Kelce at +160 is a catch in the end zone. Sitting together
+ * in one "Touchdowns" pill, next to a passing-TD line, the two read as the
+ * same bet, and a quarterback priced for a run looks like a quarterback priced
+ * to throw.
+ *
+ * So a player's touchdown prices ride with the way that player scores — the
+ * rushers under Rushing, the pass catchers under Receiving — and with both
+ * when he does both, so that browsing either list never hides a price that
+ * exists.
+ *
+ * Which he is gets decided off this board rather than off a roster, so it
+ * still works the week ESPN is unreachable: a rushing line makes you a rusher,
+ * a receiving line makes you a receiver, and nothing but passing lines makes
+ * you the quarterback, whose touchdowns are runs.
+ */
+const TD_MARKETS = new Set(['player_anytime_td', 'player_1st_td']);
+const RUSH_POS = new Set(['QB', 'RB', 'FB', 'HB']);
+const RECV_POS = new Set(['WR', 'TE']);
+
+function regroupTouchdowns(props) {
+  if (!Array.isArray(props) || !props.length) return props;
+
+  const roles = new Map();
+  for (const p of props) {
+    if (!roles.has(p.player)) roles.set(p.player, { rush: false, recv: false, pass: false, position: '' });
+    const r = roles.get(p.player);
+    if (p.market_group === 'Rushing') r.rush = true;
+    else if (p.market_group === 'Receiving') r.recv = true;
+    else if (p.market_group === 'Passing') r.pass = true;
+    if (p.position && !r.position) r.position = String(p.position).toUpperCase();
+  }
+
+  const out = [];
+  for (const p of props) {
+    if (!TD_MARKETS.has(p.market)) {
+      out.push(p);
+      continue;
+    }
+    const r = roles.get(p.player) || {};
+    const groups = [];
+    if (r.rush) groups.push('Rushing');
+    if (r.recv) groups.push('Receiving');
+    if (!groups.length) {
+      if (RECV_POS.has(r.position)) groups.push('Receiving');
+      else if (RUSH_POS.has(r.position) || r.pass) groups.push('Rushing');
+      // Nothing to go on at all. Two rows beat a hidden price.
+      else groups.push('Rushing', 'Receiving');
+    }
+    for (const g of groups) out.push({ ...p, market_group: g });
+  }
+  return out;
 }
 
 /**
@@ -473,6 +533,7 @@ function normalizeProps(raw) {
             market_short: meta.short || meta.label,
             market_group: meta.group,
             market_type: meta.type,
+            market_order: meta.order,
             unit: meta.unit,
             player,
             selection: side,
@@ -536,6 +597,7 @@ function normalizeProps(raw) {
   props.sort(
     (a, b) =>
       a.market_group.localeCompare(b.market_group) ||
+      (a.market_order ?? 99) - (b.market_order ?? 99) ||
       a.market_label.localeCompare(b.market_label) ||
       a.player.localeCompare(b.player) ||
       String(a.selection).localeCompare(String(b.selection))
@@ -697,5 +759,6 @@ module.exports = {
   hasApiKey,
   OddsApiError,
   normalizeProps,
+  regroupTouchdowns,
   SPORT,
 };

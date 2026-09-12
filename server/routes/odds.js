@@ -51,7 +51,10 @@ router.get('/events/:eventId/props', async (req, res) => {
       markets, force, cacheOnly: !req.user.is_admin,
     });
     const tagged = await roster.tagProps(result.props);
-    res.json({ ...result, roster_available: tagged.roster_available, quota: odds.quotaStatus() });
+    // Positions are on now, so touchdown prices can be filed with the way
+    // each player actually scores. See regroupTouchdowns in odds.js.
+    const props = odds.regroupTouchdowns(tagged.props);
+    res.json({ ...result, props, roster_available: tagged.roster_available, quota: odds.quotaStatus() });
   } catch (err) {
     if (err.message === 'NOT_LOADED') {
       return res.status(409).json({ error: "This week's board hasn't been pulled yet.", not_loaded: true });
@@ -79,9 +82,11 @@ router.get('/slate', async (req, res) => {
     const force = req.query.force === '1' && req.user.is_admin;
     const result = await odds.getSlateProps({ markets, force, cacheOnly: !req.user.is_admin });
     const tagged = await roster.tagProps(result.props);
+    const props = odds.regroupTouchdowns(tagged.props);
     const wk = currentWeek();
     res.json({
       ...result,
+      props,
       roster_available: tagged.roster_available,
       quota: odds.quotaStatus(),
       refresh: refresh.status(wk?.id, req.user),
@@ -119,8 +124,10 @@ router.post('/refresh', async (req, res) => {
       refresh.record(wk.id, req.user.id, { source: 'member', credits: result.cost });
     }
     const tagged = await roster.tagProps(result.props);
+    const props = odds.regroupTouchdowns(tagged.props);
     res.json({
       ...result,
+      props,
       roster_available: tagged.roster_available,
       quota: odds.quotaStatus(),
       refresh: refresh.status(wk.id, req.user),

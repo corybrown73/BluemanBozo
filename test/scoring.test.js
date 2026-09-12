@@ -469,3 +469,62 @@ test('normal helpers round-trip', () => {
     assert.ok(Math.abs(alt.normalCdf(alt.normalInv(p)) - p) < 1e-4, `round-trip at p=${p}`);
   }
 });
+
+/* ---------------------------------------------------------------------------
+ * Touchdown props are filed by how the player scores, not by the market name.
+ * A quarterback priced for an anytime TD is priced to run it in himself, which
+ * read as a passing bet while every TD market sat in one "Touchdowns" pill.
+ * ------------------------------------------------------------------------- */
+
+test('touchdown props are filed with the way the player scores', () => {
+  const odds = require('../server/odds');
+  const prop = (player, market, group, position) => ({
+    player, market, market_group: group, market_label: market, selection: 'Yes', position,
+  });
+  const groupsFor = (out, player) =>
+    [...new Set(out.filter((p) => p.player === player && p.market === 'player_anytime_td').map((p) => p.market_group))].sort();
+
+  const out = odds.regroupTouchdowns([
+    prop('Aaron Rodgers', 'player_pass_yds', 'Passing', 'QB'),
+    prop('Aaron Rodgers', 'player_anytime_td', 'Touchdowns', 'QB'),
+    prop('Travis Kelce', 'player_reception_yds', 'Receiving', 'TE'),
+    prop('Travis Kelce', 'player_anytime_td', 'Touchdowns', 'TE'),
+    prop('Saquon Barkley', 'player_rush_yds', 'Rushing', 'RB'),
+    prop('Saquon Barkley', 'player_reception_yds', 'Receiving', 'RB'),
+    prop('Saquon Barkley', 'player_anytime_td', 'Touchdowns', 'RB'),
+    prop('Nobody Knows', 'player_anytime_td', 'Touchdowns', ''),
+  ]);
+
+  assert.deepStrictEqual(groupsFor(out, 'Aaron Rodgers'), ['Rushing'], 'a quarterback scores on the ground');
+  assert.deepStrictEqual(groupsFor(out, 'Travis Kelce'), ['Receiving'], 'a tight end scores catching it');
+  assert.deepStrictEqual(groupsFor(out, 'Saquon Barkley'), ['Receiving', 'Rushing'], 'a back who does both shows in both');
+  assert.deepStrictEqual(groupsFor(out, 'Nobody Knows'), ['Receiving', 'Rushing'], 'with nothing to go on, never hide the price');
+  assert.ok(!out.some((p) => p.market_group === 'Touchdowns'), 'nothing is left in a bare Touchdowns pill');
+
+  // The quarterback's passing lines must not move with him.
+  const rodgersPass = out.find((p) => p.player === 'Aaron Rodgers' && p.market === 'player_pass_yds');
+  assert.strictEqual(rodgersPass.market_group, 'Passing');
+});
+
+test('touchdown regrouping works with no roster at all', () => {
+  const odds = require('../server/odds');
+  const prop = (player, market, group) => ({ player, market, market_group: group, selection: 'Yes' });
+  // ESPN unreachable: no positions anywhere. The board itself still says who
+  // is who — only passing lines means quarterback.
+  const out = odds.regroupTouchdowns([
+    prop('Some QB', 'player_pass_yds', 'Passing'),
+    prop('Some QB', 'player_anytime_td', 'Touchdowns'),
+    prop('Some WR', 'player_reception_yds', 'Receiving'),
+    prop('Some WR', 'player_1st_td', 'Touchdowns'),
+  ]);
+  assert.strictEqual(out.find((p) => p.player === 'Some QB' && p.market === 'player_anytime_td').market_group, 'Rushing');
+  assert.strictEqual(out.find((p) => p.player === 'Some WR' && p.market === 'player_1st_td').market_group, 'Receiving');
+});
+
+test('markets carry a display order so columns lead with yards', () => {
+  const odds = require('../server/odds');
+  const order = (k) => odds.marketMeta(k).order;
+  assert.ok(order('player_rush_yds') < order('player_anytime_td'), 'rushing yards come before anytime TD');
+  assert.ok(order('player_anytime_td') < order('player_1st_td'), 'anytime TD comes before first TD');
+  assert.ok(order('player_reception_yds') < order('player_anytime_td'), 'receiving yards come before anytime TD');
+});

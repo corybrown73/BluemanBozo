@@ -207,6 +207,7 @@ const S = {
   props: null,
   propsLoading: false,
   propsError: null,
+  openSections: new Set(),   // which game sections are expanded
   shameScope: 'all',   // 'season' | 'all'
   boardNotLoaded: false,
   propFilter: '',
@@ -1036,9 +1037,15 @@ function propBoard() {
 
   const slate = S.propSource === 'slate';
   const all = S.props.props;
+  // A player who both runs and catches has his touchdown price filed under
+  // Rushing and under Receiving, so the raw length counts that bet twice.
+  const betCount = new Set(all.map((p) => `${p.market}|${p.player}|${p.selection}`)).size;
 
   // Categories present in this board, in a fixed running order.
-  const ORDER = ['Touchdowns', 'Passing', 'Rushing', 'Receiving', 'Combo', 'Kicking', 'Defense'];
+  // Touchdowns is no longer a pill of its own — those prices live with the
+  // rushers and the receivers now — but it stays in the order as a backstop
+  // in case a board ever hands one back unfiled.
+  const ORDER = ['Passing', 'Rushing', 'Receiving', 'Combo', 'Touchdowns', 'Kicking', 'Defense'];
   const present = [...new Set(all.map((p) => p.market_group))].sort(
     (a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99)
   );
@@ -1058,23 +1065,45 @@ function propBoard() {
   const category = present.includes(S.propCategory) ? S.propCategory : present[0];
 
   const filter = S.propFilter.trim().toLowerCase();
-  const inCategory = all.filter((p) => p.market_group === category);
-  const matched = inCategory.filter(
-    (p) =>
-      !filter ||
-      p.player.toLowerCase().includes(filter) ||
-      (p.team || '').toLowerCase().includes(filter) ||
-      (p.game_label || '').toLowerCase().includes(filter)
-  );
+  const hits = (p) =>
+    !filter ||
+    p.player.toLowerCase().includes(filter) ||
+    (p.team || '').toLowerCase().includes(filter) ||
+    (p.game_label || '').toLowerCase().includes(filter);
 
-  // Columns: the markets in this category that actually came back.
+  // A player only appears under the categories he has props in — Kelce is in
+  // Touchdowns and Receiving, never Passing. Searching his name while parked
+  // on the wrong pill used to read as "nobody matches", which is a lie. So
+  // while a search is running every pill carries its own hit count, and the
+  // empty state points at the pills that do have him.
+  const catCounts = new Map();
+  if (filter) {
+    for (const g of present) {
+      const players = new Set();
+      for (const p of all) if (p.market_group === g && hits(p)) players.add(p.player);
+      catCounts.set(g, players.size);
+    }
+  }
+
+  const matched = all.filter((p) => p.market_group === category && hits(p));
+  const elsewhere = filter ? present.filter((g) => g !== category && catCounts.get(g)) : [];
+
+  // Columns: the markets in this category that actually came back, in the
+  // order the server declares them — yards, then what the player did with it.
+  // Alphabetical used to lead with "Anytime" and "Att".
   const columns = [];
   for (const p of matched) {
     if (!columns.some((c) => c.market === p.market)) {
-      columns.push({ market: p.market, short: p.market_short || p.market_label, label: p.market_label, type: p.market_type });
+      columns.push({
+        market: p.market,
+        short: p.market_short || p.market_label,
+        label: p.market_label,
+        type: p.market_type,
+        order: p.market_order ?? 99,
+      });
     }
   }
-  columns.sort((a, b) => a.short.localeCompare(b.short));
+  columns.sort((a, b) => a.order - b.order || a.short.localeCompare(b.short));
 
   const hasOU = columns.some((c) => c.type === 'ou');
   const canGroupByTeam = Boolean(S.props.roster_available);
@@ -1094,7 +1123,7 @@ function propBoard() {
   return html`<div class="card board">
     <div class="card-head">
       <h2>Pick a player prop</h2>
-      <span class="badge">${raw(slate ? `${esc(all.length)} props` : `${esc(ev.away_team)} @ ${esc(ev.home_team)}`)}</span>
+      <span class="badge">${raw(slate ? `${esc(betCount)} props` : `${esc(ev.away_team)} @ ${esc(ev.home_team)}`)}</span>
       <div class="spacer"></div>
       <span class="tiny faint">${cacheNote}</span>
       ${raw(refreshControl())}
@@ -1103,10 +1132,16 @@ function propBoard() {
     <div class="pill-row" role="group" aria-label="Prop category">
       ${raw(
         present
-          .map(
-            (g) => html`<button class="pill ${g === category ? 'active' : ''}" data-cat="${g}"
-              aria-pressed="${g === category ? 'true' : 'false'}">${g}</button>`
-          )
+          .map((g) => {
+            const n = catCounts.get(g);
+            // The count is a chip, so it would otherwise be read out as
+            // "Receiving1". Spell it for anyone listening.
+            return html`<button class="pill ${g === category ? 'active' : ''} ${raw(
+              filter && !n ? 'dim' : ''
+            )}" data-cat="${g}" aria-pressed="${g === category ? 'true' : 'false'}"
+              ${raw(filter ? html`aria-label="${g}, ${n} match${raw(n === 1 ? '' : 'es')}"` : '')}
+              >${g}${raw(filter ? html`<span class="pill-n" aria-hidden="true">${n}</span>` : '')}</button>`;
+          })
           .join('')
       )}
     </div>
@@ -1142,8 +1177,27 @@ function propBoard() {
 
     ${raw(
       totalRows === 0
-        ? html`<div class="empty"><p class="muted">No ${esc(String(category || '').toLowerCase())} props match that search.</p></div>`
-        : sections.map((sec) => propSection(sec, columns)).join('')
+        ? html`<div class="empty">
+            <p class="muted">No ${String(category || '').toLowerCase()} props for &ldquo;${S.propFilter.trim()}&rdquo;.</p>
+            ${raw(
+              elsewhere.length
+                ? html`<p class="tiny faint">On the board under:</p>
+                    <div class="pill-row center">${raw(
+                      elsewhere
+                        .map(
+                          (g) => html`<button class="pill" data-cat="${g}"
+                            aria-label="Show ${g}, ${raw(catCounts.get(g))} match${raw(
+                              catCounts.get(g) === 1 ? '' : 'es'
+                            )}">${g}<span class="pill-n" aria-hidden="true">${raw(
+                            catCounts.get(g)
+                          )}</span></button>`
+                        )
+                        .join('')
+                    )}</div>`
+                : '<p class="tiny faint">Nobody on this week&rsquo;s board matches that.</p>'
+            )}
+          </div>`
+        : sections.map((sec) => propSection(sec, columns, { forceOpen: Boolean(filter) })).join('')
     )}
   </div>
 
@@ -1202,24 +1256,38 @@ function groupProps(props, groupBy, slate) {
     });
 }
 
-function propSection(section, columns) {
+function propSection(section, columns, { forceOpen = false } = {}) {
+  // A–Z is one big section; there is nothing to collapse it against.
   const single = section.key === '__all__';
-  return html`<div class="board-section">
+  // A full Sunday slate is fifteen games. Stacked open that is a page nobody
+  // scrolls to the end of, so they start shut and you open the one you want.
+  const open = single || forceOpen || S.openSections.has(section.key);
+  const count = section.rows.length;
+
+  return html`<div class="board-section ${open ? '' : 'shut'}">
     ${raw(
       single
         ? ''
-        : html`<div class="board-section-head">
+        : html`<button type="button" class="board-section-head" data-section="${section.key}"
+            aria-expanded="${open ? 'true' : 'false'}">
+            <span class="sec-caret" aria-hidden="true">${raw(open ? '▾' : '▸')}</span>
             <b>${section.title}</b>
             ${raw(section.subtitle ? html`<span class="tiny faint">${section.subtitle}</span>` : '')}
+            <span class="spacer"></span>
+            <span class="tiny faint">${count} player${raw(count === 1 ? '' : 's')}</span>
+          </button>`
+    )}
+    ${raw(
+      !open
+        ? ''
+        : html`<div class="board-grid" style="--cols:${raw(columns.length)}">
+            <div class="board-row board-head">
+              <div class="board-player"></div>
+              ${raw(columns.map((c) => html`<div class="board-col">${c.short}</div>`).join(''))}
+            </div>
+            ${raw(section.rows.map((row) => propRow(row, columns)).join(''))}
           </div>`
     )}
-    <div class="board-grid" style="--cols:${raw(columns.length)}">
-      <div class="board-row board-head">
-        <div class="board-player"></div>
-        ${raw(columns.map((c) => html`<div class="board-col">${c.short}</div>`).join(''))}
-      </div>
-      ${raw(section.rows.map((row) => propRow(row, columns)).join(''))}
-    </div>
   </div>`;
 }
 
@@ -1642,6 +1710,15 @@ function wirePick() {
       loadSlate(false, { confirmCost: true });
     });
   }
+
+  $$('[data-section]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const key = b.dataset.section;
+      if (S.openSections.has(key)) S.openSections.delete(key);
+      else S.openSections.add(key);
+      render();
+    })
+  );
 
   const filter = $('#propFilter');
   if (filter) {

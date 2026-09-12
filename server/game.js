@@ -57,6 +57,7 @@ function decoratePick(pick) {
     unit: meta.unit,
     market_group: meta.group,
     market_type: meta.type,
+    market_order: meta.order,
     price_display: scoring.formatAmerican(pick.price),
     decimal_odds: Number(scoring.americanToDecimal(pick.price).toFixed(4)),
     ...breakdown,
