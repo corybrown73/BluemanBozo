@@ -272,39 +272,34 @@ The vote outranks the Index. The Index only breaks ties and fills in if nobody v
 
 ## Bringing over the Google Sheet
 
-Export it (`File → Download → .csv`), then:
+In the sheet: **File → Download → Comma-separated values**, then:
 
 ```bash
-# One row per week — keeps the actual picks
-node scripts/import-csv.js history.csv --season 2024 --dry-run
-node scripts/import-csv.js history.csv --season 2024
+node scripts/import-csv.js 2025-history.csv --season 2025 --dry-run   # look first
+node scripts/import-csv.js 2025-history.csv --season 2025
 ```
 
-```csv
-week,date,bozo,player,market,side,line,odds,actual,stake
-1,2024-09-08,Dave,Josh Allen,Passing Yards,Over,249.5,-115,180,20
-2,2024-09-15,Mike,Puka Nacua,Receiving Yards,Over,74.5,-110,11,20
+It handles the grid most groups actually keep — one row per week, one column
+per person, Hit/Miss in the cells:
+
+```
+Week,Cory,Derek,Eric,Julian,Michael,Ricky
+1,Hit,Hit,Miss,Miss,Hit,Miss
+2,Hit,Miss,Hit,Miss,Miss,Hit
+TGD,,Miss,Miss,Miss,Hit,
 ```
 
-Only `week` and `bozo` are required. Column names are matched loosely — `Week #`,
-`Bozo of the Week`, `Prop`, `O/U`, `Result` all work. Members not in the database
-are created automatically (give them passwords in Commissioner → Members).
+Blank means they sat that week out. Non-numeric labels (TGD, WC, DR) are kept
+as labels. Members are matched on name, so people already in the app are
+linked rather than duplicated; anyone missing is created. Add a `Bozo` column
+to record who paid each week — without it the weeks import with an all-time
+record but nobody crowned.
 
-If your sheet is only a running tally, use `--tally`:
+The sheet does not say what anyone actually picked, so imported picks carry
+the result and read "Not recorded" rather than inventing a player and a line.
 
-```csv
-name,bozos
-Dave,4
-Mike,2
-```
-
-```bash
-node scripts/import-csv.js tally.csv --tally --season 2024
-```
-
-**Always `--dry-run` first.**
-
----
+`--tally` takes a plain `name,bozos` count instead, and a sheet with real pick
+columns (player, line, odds, actual) imports those in full.
 
 ## Deploying to www.bluemanbozo.com
 

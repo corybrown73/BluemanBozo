@@ -29,6 +29,28 @@
  *   node scripts/import-csv.js history.csv --season 2024
  *   node scripts/import-csv.js history.csv --season 2024 --dry-run
  *   node scripts/import-csv.js tally.csv --tally --season 2023
+ *
+ * 3. The grid most groups actually keep (--grid, auto-detected):
+ *
+ *      Week,Cory,Derek,Eric,Julian,Michael,Ricky
+ *      1,Hit,Hit,Miss,Miss,Hit,Miss
+ *      2,Hit,Miss,Hit,Miss,Miss,Hit
+ *      TGD,,Miss,Miss,Miss,Hit,
+ *
+ *    One row per week, one column per person, Hit/Miss in the cells. Blank
+ *    means they sat that week out. Column headers become members, created if
+ *    they do not exist yet. Non-numeric week labels (TGD, WC, DR) are kept as
+ *    labels. An optional Bozo column names who paid that week.
+ *
+ *    The sheet does not record what anyone actually picked, so the imported
+ *    picks carry the result and nothing else — enough for an honest all-time
+ *    record, and honest about what it does not know.
+ *
+ * Usage:
+ *   node scripts/import-csv.js history.csv --season 2024
+ *   node scripts/import-csv.js history.csv --season 2024 --dry-run
+ *   node scripts/import-csv.js tally.csv --tally --season 2023
+ *   node scripts/import-csv.js grid.csv --grid --season 2025
  */
 
 require('dotenv').config();
@@ -45,11 +67,12 @@ const args = process.argv.slice(2);
 const file = args.find((a) => !a.startsWith('--'));
 const dryRun = args.includes('--dry-run');
 const tallyMode = args.includes('--tally');
+const gridMode = args.includes('--grid');
 const seasonArg = args[args.indexOf('--season') + 1];
 const seasonYear = args.includes('--season') ? parseInt(seasonArg, 10) : nflSeasonYear(new Date());
 
 if (!file) {
-  console.error('Usage: node scripts/import-csv.js <file.csv> [--season 2024] [--tally] [--dry-run]');
+  console.error('Usage: node scripts/import-csv.js <file.csv> [--season 2024] [--tally|--grid] [--dry-run]');
   process.exit(1);
 }
 if (!fs.existsSync(file)) {
@@ -318,6 +341,145 @@ function importWeeks(rows) {
 
 /* ---------------- run ---------------- */
 
+/* ---------------- grid: one row per week, one column per person ---------------- */
+
+const HIT = /^(hit|win|w|y|yes|✓|✔|1|cash|cashed)$/i;
+const MISS = /^(miss|loss|lose|l|n|no|x|✗|✘|0|dead)$/i;
+
+/**
+ * Does this look like a Hit/Miss grid rather than a list of picks?
+ * The giveaway is a first column of weeks and no column we recognise as a
+ * pick field — just names.
+ */
+function looksLikeGrid(rows) {
+  const headers = rows[0].map(norm);
+  if (!headers.length || !/^week/.test(headers[0])) return false;
+  const known = ['player', 'prop', 'market', 'side', 'line', 'odds', 'price', 'actual', 'stake', 'date', 'bozo', 'result'];
+  const rest = headers.slice(1).filter(Boolean);
+  if (rest.length < 2) return false;
+  if (rest.some((h) => known.includes(h))) return false;
+  // and the body should be mostly Hit/Miss
+  const cells = rows.slice(1).flatMap((r) => r.slice(1)).map((c) => String(c || '').trim()).filter(Boolean);
+  if (!cells.length) return false;
+  const recognised = cells.filter((c) => HIT.test(c) || MISS.test(c)).length;
+  return recognised / cells.length > 0.8;
+}
+
+function importGrid(rows) {
+  const headers = rows[0];
+  const bozoCol = headers.findIndex((h, i) => i > 0 && norm(h) === 'bozo');
+  const nameCols = headers
+    .map((h, i) => ({ name: String(h || '').trim(), i }))
+    .filter((c) => c.i > 0 && c.i !== bozoCol && c.name);
+
+  if (!nameCols.length) {
+    console.error('No member columns found. Expected: Week,Name,Name,...');
+    process.exit(1);
+  }
+
+  const season = findOrCreateSeason(seasonYear);
+  console.log(`Members in this sheet: ${nameCols.map((c) => c.name).join(', ')}\n`);
+  const users = new Map(nameCols.map((c) => [c.i, findOrCreateUser(c.name)]));
+
+  let weeksMade = 0;
+  let picksMade = 0;
+  let skipped = 0;
+  let autoNumber = 1000; // non-numeric labels get numbers out of the way of real weeks
+  const tally = new Map();
+
+  for (const row of rows.slice(1)) {
+    const rawLabel = String(row[0] || '').trim();
+    if (!rawLabel) continue;
+
+    const cells = nameCols.map((c) => String(row[c.i] || '').trim());
+    if (!cells.some(Boolean)) continue; // an untouched row — a week not played yet
+
+    const numeric = /^\d+$/.test(rawLabel);
+    const weekNumber = numeric ? parseInt(rawLabel, 10) : autoNumber++;
+    const label = numeric ? null : rawLabel;
+
+    let week = db
+      .prepare('SELECT * FROM weeks WHERE season_id = ? AND week_number = ?')
+      .get(season.id, weekNumber);
+
+    if (!week) {
+      if (dryRun) {
+        week = { id: -1, week_number: weekNumber };
+      } else {
+        const info = db
+          .prepare(`INSERT INTO weeks (season_id, week_number, label, status) VALUES (?, ?, ?, 'final')`)
+          .run(season.id, weekNumber, label);
+        week = db.prepare('SELECT * FROM weeks WHERE id = ?').get(info.lastInsertRowid);
+      }
+      weeksMade += 1;
+    }
+
+    for (let k = 0; k < nameCols.length; k += 1) {
+      const cell = cells[k];
+      if (!cell) continue;
+      const isHit = HIT.test(cell);
+      const isMiss = MISS.test(cell);
+      if (!isHit && !isMiss) {
+        console.log(`    ? ${rawLabel} / ${nameCols[k].name}: "${cell}" is neither hit nor miss — skipped`);
+        skipped += 1;
+        continue;
+      }
+      const user = users.get(nameCols[k].i);
+      if (!user) continue;
+
+      const t = tally.get(user.display_name) || { hit: 0, miss: 0 };
+      t[isHit ? 'hit' : 'miss'] += 1;
+      tally.set(user.display_name, t);
+      picksMade += 1;
+
+      if (dryRun) continue;
+      const already = db
+        .prepare('SELECT 1 FROM picks WHERE week_id = ? AND user_id = ?')
+        .get(week.id, user.id);
+      if (already) continue;
+
+      // The sheet recorded the outcome and nothing else. Say so rather than
+      // inventing a player and a line that were never written down.
+      db.prepare(
+        `INSERT INTO picks (week_id, user_id, player, market, market_label, selection,
+                            line, price, line_source, result, graded_at)
+         VALUES (?, ?, 'Not recorded', 'legacy', 'Imported from the sheet', 'Over',
+                 NULL, -110, 'manual', ?, datetime('now'))`
+      ).run(week.id, user.id, isHit ? 'win' : 'loss');
+    }
+
+    if (bozoCol > 0 && !dryRun) {
+      const bozoName = String(row[bozoCol] || '').trim();
+      if (bozoName) {
+        const bozo = findOrCreateUser(bozoName);
+        if (bozo && bozo.id > 0 && !db.prepare('SELECT 1 FROM bozos WHERE week_id = ?').get(week.id)) {
+          db.prepare(`INSERT INTO bozos (week_id, user_id, method, roast) VALUES (?, ?, 'imported', ?)`)
+            .run(week.id, bozo.id, 'Imported from the old spreadsheet.');
+        }
+      }
+    }
+  }
+
+  console.log(`\n  weeks:  ${weeksMade} created`);
+  console.log(`  picks:  ${picksMade} results recorded${skipped ? `  (${skipped} unrecognised cells skipped)` : ''}`);
+  console.log('\n  All-time record from this sheet:');
+  const width = Math.max(...[...tally.keys()].map((n) => n.length), 6);
+  for (const [name, t] of [...tally.entries()].sort((a, b) => {
+    const pa = a[1].hit / (a[1].hit + a[1].miss);
+    const pb = b[1].hit / (b[1].hit + b[1].miss);
+    return pb - pa;
+  })) {
+    const total = t.hit + t.miss;
+    const pctStr = total ? `${Math.round((t.hit / total) * 100)}%` : '—';
+    console.log(`    ${name.padEnd(width)}  ${String(t.hit).padStart(2)}-${String(t.miss).padStart(2)}   ${pctStr.padStart(4)}`);
+  }
+  if (bozoCol < 0) {
+    console.log('\n  No Bozo column in this sheet, so nobody was crowned. Add one to');
+    console.log('  record who paid each week.');
+  }
+}
+
+
 console.log(`\n🤡 Importing ${file} into the ${seasonYear} season${dryRun ? ' (DRY RUN — nothing will be written)' : ''}\n`);
 
 const rows = parseCsv(fs.readFileSync(file, 'utf8'));
@@ -328,6 +490,8 @@ if (rows.length < 2) {
 console.log(`Columns detected: ${rows[0].join(' | ')}\n`);
 
 const run = dryRun ? (fn) => fn() : db.transaction((fn) => fn());
-run(() => (tallyMode ? importTally(rows) : importWeeks(rows)));
+const useGrid = gridMode || (!tallyMode && looksLikeGrid(rows));
+if (useGrid && !gridMode) console.log('Looks like a Hit/Miss grid — importing it as one.\n');
+run(() => (tallyMode ? importTally(rows) : useGrid ? importGrid(rows) : importWeeks(rows)));
 
 console.log(dryRun ? '\nDry run complete. Re-run without --dry-run to apply.\n' : '\nDone. Check the Hall of Shame.\n');
