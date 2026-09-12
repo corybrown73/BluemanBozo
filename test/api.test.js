@@ -468,34 +468,56 @@ test('a cashed ticket is counted only when every settled leg won', async () => {
   assert.strictEqual(before.tickets_cashed, 0, 'a week with a loss is not a cashed ticket');
 });
 
-test('the game list is narrowed to the current slate, not the whole season', () => {
+test('the board offers this football week only, not next Thursday', () => {
   const odds = require('../server/odds');
   const { setSetting } = require('../server/db');
-  const day = 86400000;
-  const at = (d) => new Date(Date.now() + d * day).toISOString();
+  const iso = (d) => new Date(d).toISOString();
 
-  // What the Odds API actually returns in September: the rest of the season.
-  const season = [
-    { id: 'live', commence_time: at(-0.05) },   // kicked off an hour ago
-    { id: 'today', commence_time: at(0.2) },
-    { id: 'sunday', commence_time: at(2) },
-    { id: 'thursday', commence_time: at(6) },
-    { id: 'next_week', commence_time: at(11) },
-    { id: 'december', commence_time: at(90) },
-    { id: 'january', commence_time: at(130) },
+  // Saturday 12 Sep 2026, mid-afternoon UTC. A real Week 2 slate.
+  const saturday = Date.parse('2026-09-12T18:00:00Z');
+  const slate = [
+    { id: 'sun_early',  commence_time: iso(Date.parse('2026-09-13T17:00:00Z')) },
+    { id: 'sun_late',   commence_time: iso(Date.parse('2026-09-14T00:25:00Z')) },
+    { id: 'sun_night',  commence_time: iso(Date.parse('2026-09-14T00:20:00Z')) },
+    { id: 'mon_night',  commence_time: iso(Date.parse('2026-09-15T00:15:00Z')) },
+    // Week 3 — kicks off AFTER this week is graded and the bozo is crowned.
+    { id: 'next_thu',   commence_time: iso(Date.parse('2026-09-18T00:15:00Z')) },
+    { id: 'next_sun',   commence_time: iso(Date.parse('2026-09-20T17:00:00Z')) },
+    { id: 'december',   commence_time: iso(Date.parse('2026-12-06T18:00:00Z')) },
   ];
 
-  setSetting('slate_days', '8');
-  const slate = odds.withinSlate(season).map((e) => e.id);
-  assert.deepStrictEqual(slate, ['live', 'today', 'sunday', 'thursday'],
-    'this week only — a game 90 days out is not something anyone is picking');
+  setSetting('slate_days', 'week');
+  assert.deepStrictEqual(
+    odds.withinSlate(slate, saturday).map((e) => e.id),
+    ['sun_early', 'sun_late', 'sun_night', 'mon_night'],
+    'Sunday and Monday are in; next Thursday is not'
+  );
 
+  // Midweek: the upcoming Thursday IS this week.
+  const wednesday = Date.parse('2026-09-16T18:00:00Z');
+  assert.deepStrictEqual(
+    odds.withinSlate(slate, wednesday).map((e) => e.id),
+    ['next_thu', 'next_sun'],
+    'from Wednesday, Thursday through Monday is the current week'
+  );
+
+  // The seam: Tuesday noon UTC, just after Monday night football.
+  const tueBefore = Date.parse('2026-09-15T11:00:00Z');
+  const tueAfter = Date.parse('2026-09-15T13:00:00Z');
+  assert.ok(odds.nflWeekEnd(new Date(tueBefore)).getTime() > tueBefore, 'before the seam, the week has not rolled');
+  assert.strictEqual(
+    odds.nflWeekEnd(new Date(tueAfter)).toISOString(), '2026-09-22T12:00:00.000Z',
+    'after the seam it rolls to the following Tuesday'
+  );
+
+  // Escape hatches.
   setSetting('slate_days', '0');
-  assert.strictEqual(odds.withinSlate(season).length, season.length, '0 turns the window off');
+  assert.strictEqual(odds.withinSlate(slate, saturday).length, slate.length, "'0' shows everything");
+  setSetting('slate_days', '14');
+  assert.strictEqual(odds.withinSlate(slate, saturday).length, 6, 'a number gives a rolling window');
 
-  setSetting('slate_days', '8');
-  // A quiet stretch must not look like a broken feed.
-  const farOff = [{ id: 'a', commence_time: at(60) }, { id: 'b', commence_time: at(61) }];
-  assert.strictEqual(odds.withinSlate(farOff).length, 2, 'falls back to showing something');
-  assert.deepStrictEqual(odds.withinSlate([]), [], 'but invents nothing');
+  setSetting('slate_days', 'week');
+  const farOff = [{ id: 'a', commence_time: iso(Date.parse('2026-12-06T18:00:00Z')) }];
+  assert.strictEqual(odds.withinSlate(farOff, saturday).length, 1, 'an empty week still shows something');
+  assert.deepStrictEqual(odds.withinSlate([], saturday), [], 'but invents nothing');
 });

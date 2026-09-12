@@ -273,28 +273,56 @@ async function request(pathname, params, { endpoint, credits }) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Only this week's slate.
+ * The end of the current NFL week.
+ *
+ * A football week runs Thursday night through Monday night, so Tuesday morning
+ * is the seam. 12:00 UTC is 8am Eastern — comfortably after Monday Night
+ * Football has finished, and before any Thursday game the following week.
+ */
+function nflWeekEnd(now = new Date()) {
+  const end = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12, 0, 0, 0)
+  );
+  // Walk forward to the next Tuesday noon UTC strictly after `now`.
+  while (end.getUTCDay() !== 2 || end.getTime() <= now.getTime()) {
+    end.setUTCDate(end.getUTCDate() + 1);
+  }
+  return end;
+}
+
+/**
+ * Only the games anyone is picking from.
  *
  * The Odds API /events returns every scheduled game — in September that is the
- * rest of the season, 212 of them. That buries the 16 games anyone is actually
- * picking from, and turns "Load all games" into a 1,000-credit request against
- * a 500-credit plan. The full list stays cached (the call is free); this just
- * narrows what callers see.
+ * rest of the season, 212 of them. That buries this week's slate and turns
+ * "Load all games" into a 1,000-credit request against a 500-credit plan. The
+ * full list stays cached (the call is free); this narrows what callers see.
  *
- * Set slate_days to 0 to turn the window off.
+ * slate_days: 'week' (default) stops at the end of the current football week,
+ * so next Thursday's game — which kicks off after this week is graded — never
+ * shows up as pickable. A number gives a rolling window of that many days.
+ * '0' or 'all' turns the window off.
  */
-function withinSlate(events) {
+function withinSlate(events, now = Date.now()) {
   if (!Array.isArray(events)) return [];
-  const days = parseInt(getSetting('slate_days'), 10);
-  if (!Number.isFinite(days) || days <= 0) return events;
-  const now = Date.now();
-  const cutoff = now + days * 86400000;
+  const raw = String(getSetting('slate_days') ?? 'week').trim().toLowerCase();
+  if (raw === '0' || raw === 'all') return events;
+
+  let cutoff;
+  if (raw === 'week' || raw === '') {
+    cutoff = nflWeekEnd(new Date(now)).getTime();
+  } else {
+    const days = parseInt(raw, 10);
+    if (!Number.isFinite(days) || days <= 0) return events;
+    cutoff = now + days * 86400000;
+  }
+
   const filtered = events.filter((e) => {
     const t = Date.parse(e?.commence_time);
     // A game that kicked off in the last few hours is still worth showing.
     return Number.isFinite(t) && t >= now - 4 * 3600000 && t <= cutoff;
   });
-  // Never hand back nothing when there genuinely are games — a quiet week
+  // Never hand back nothing when there genuinely are games — a quiet stretch
   // should not look like a broken feed.
   return filtered.length ? filtered : events.slice(0, 20);
 }
@@ -600,6 +628,7 @@ async function getScores({ daysFrom = 3, force = false } = {}) {
 
 module.exports = {
   withinSlate,
+  nflWeekEnd,
   MARKETS,
   marketMeta,
   sideIsValid,
