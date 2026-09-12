@@ -310,21 +310,73 @@ function nflSeasonYear(date) {
   return d.getUTCMonth() <= 6 ? d.getUTCFullYear() - 1 : d.getUTCFullYear();
 }
 
+/**
+ * The week the app is about right now.
+ *
+ * A week that still needs settling comes first: one waiting on a vote, then
+ * one waiting on stat lines. Only once those are done does the next open week
+ * take over. The old order put an open week ahead of everything, so the
+ * moment Tuesday's week was opened — by hand or by the scheduler — last
+ * week's vote screen vanished from the app with the bozo still uncrowned.
+ * The bill has to be settled before anyone moves on; the sheet worked the
+ * same way, it just had two rows.
+ *
+ * A locked week nobody picked in is skipped: there is nothing in it to
+ * settle, and it must not hold the season hostage.
+ */
 function currentWeek() {
   const season = activeSeason();
   return (
     db
       .prepare(
-        `SELECT * FROM weeks WHERE season_id = ?
-         ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'locked' THEN 1 WHEN 'graded' THEN 2 ELSE 3 END,
-                  week_number DESC
+        `SELECT w.* FROM weeks w WHERE w.season_id = ?
+         ORDER BY CASE w.status
+                    WHEN 'graded' THEN 0
+                    WHEN 'locked' THEN
+                      CASE WHEN EXISTS (SELECT 1 FROM picks p WHERE p.week_id = w.id) THEN 1 ELSE 3 END
+                    WHEN 'open'   THEN 2
+                    ELSE 4
+                  END,
+                  w.week_number DESC
          LIMIT 1`
       )
       .get(season.id) || null
   );
 }
 
+/**
+ * The week people are picking in — the latest open one, or nothing. Not the
+ * same question as currentWeek(): the Saturday lock and the Tuesday summons
+ * are about picks, and must not land on the week still being graded.
+ */
+function pickWeek() {
+  const season = activeSeason();
+  return (
+    db
+      .prepare(
+        `SELECT * FROM weeks WHERE season_id = ? AND status = 'open' ORDER BY week_number DESC LIMIT 1`
+      )
+      .get(season.id) || null
+  );
+}
+
+/** A later week already open for picks, waiting behind one still being settled. */
+function upcomingWeek(current) {
+  if (!current) return null;
+  return (
+    db
+      .prepare(
+        `SELECT id, week_number FROM weeks
+         WHERE season_id = ? AND status = 'open' AND week_number > ?
+         ORDER BY week_number ASC LIMIT 1`
+      )
+      .get(current.season_id, current.week_number) || null
+  );
+}
+
 module.exports = {
+  upcomingWeek,
+  pickWeek,
   db,
   DB_PATH,
   DATA_DIR,

@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { db, getSetting, activeSeason, currentWeek } = require('../db');
+const { db, getSetting, activeSeason, currentWeek, upcomingWeek } = require('../db');
 const { requireAuth, requireAdmin } = require('../auth');
 const game = require('../game');
 const scoring = require('../scoring');
@@ -43,6 +43,9 @@ router.get('/state', (req, res) => {
       site_url: getSetting('site_url', process.env.SITE_URL || ''),
     },
     current_week: week ? game.weekDetail(week.id, req.user) : null,
+    // Next week may already be open behind one still being settled. Named so
+    // the pick tab can say when picking starts instead of just "locked".
+    upcoming_week: week && week.status !== 'open' ? upcomingWeek(week) : null,
     quota: odds.quotaStatus(),
     channels: notify.channelStatus(),
   });

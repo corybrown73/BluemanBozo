@@ -243,6 +243,7 @@ async function loadState() {
   S.users = data.users || [];
   S.season = data.season;
   S.week = data.current_week;
+  S.upcoming = data.upcoming_week || null;
   S.quota = data.quota;
   S.channels = data.channels;
 }
@@ -914,10 +915,27 @@ function viewPick() {
   }
   const w = S.week.week;
   if (w.status !== 'open' && !S.user.is_admin) {
+    // Last week is still being settled. Say what is actually happening and
+    // what comes next, rather than a bare "locked" with nowhere to go.
+    const why = {
+      locked: `Week ${w.week_number} is waiting on the stat lines.`,
+      graded: `Week ${w.week_number} is voting on the bozo.`,
+      final: `Week ${w.week_number} is closed.`,
+    }[w.status] || `Week ${w.week_number} is ${w.status}.`;
+    const next = S.upcoming
+      ? `Week ${S.upcoming.week_number} opens for picks the moment it's settled.`
+      : w.status === 'final'
+      ? 'The commissioner opens the next week on Tuesday.'
+      : 'Nothing to do here but wait.';
     return html`<div class="card"><div class="empty">
-      <div class="big" aria-hidden="true">🔒</div><h2>Picks are locked</h2>
-      <p class="muted">Week ${w.week_number} is ${w.status}. Nothing to do here but wait.</p>
-      <a class="btn" href="#week">Back to the board</a>
+      <div class="big" aria-hidden="true">${raw(w.status === 'graded' ? '🗳️' : '🔒')}</div>
+      <h2>${raw(w.status === 'graded' ? 'Vote first' : 'Picks are locked')}</h2>
+      <p class="muted">${why} ${next}</p>
+      ${raw(
+        w.status === 'graded' && w.voting_open && !S.week.my_vote
+          ? '<a class="btn primary" href="#vote">Cast your vote</a>'
+          : '<a class="btn" href="#week">Back to the board</a>'
+      )}
     </div></div>`;
   }
 
@@ -2735,10 +2753,23 @@ function viewAdmin() {
             </div>`
       )}
       <hr class="sep">
-      <div class="row">
-        <button class="btn primary" id="newWeek">Open the next week</button>
-        <span class="tiny faint">Last week's bozo is auto-assigned as the payer.</span>
-      </div>
+      ${raw(
+        S.upcoming
+          ? html`<div class="row">
+              <span class="badge">Week ${S.upcoming.week_number} is already open</span>
+              <span class="tiny faint">It takes over the moment week ${raw(w ? w.week_number : '')} is settled${raw(
+                w && w.status === 'graded' ? ' — crown the bozo' : w && w.status === 'locked' ? ' — enter the stat lines' : ''
+              )}.</span>
+            </div>`
+          : html`<div class="row">
+              <button class="btn primary" id="newWeek">Open the next week</button>
+              <span class="tiny faint">${raw(
+                w && w.status !== 'final'
+                  ? `It waits behind week ${esc(w.week_number)} until that one is settled. Last week's bozo pays.`
+                  : "Last week's bozo is auto-assigned as the payer."
+              )}</span>
+            </div>`
+      )}
     </div>
 
     ${raw(w && (w.status === 'locked' || w.status === 'graded' || w.status === 'final') ? gradePanel() : '')}
@@ -3304,12 +3335,19 @@ function wireAdmin() {
   if (newWeek) {
     newWeek.addEventListener('click', async () => {
       try {
-        await api('/api/weeks', { method: 'POST', body: {} });
+        const made = await api('/api/weeks', { method: 'POST', body: {} });
         S.adminData = null;
         S.historyRows = null;
         await loadState();
-        toast(`Week ${S.week?.week?.week_number ?? ''} is live.`.replace('  ', ' '), 'ok');
-        window.location.hash = 'week';
+        // The app may still be on the week being settled, so name the week
+        // that was actually created, not whatever is current.
+        const n = made.week.week_number;
+        if (S.week?.week?.id === made.week.id) {
+          toast(`Week ${n} is live.`, 'ok');
+          window.location.hash = 'week';
+        } else {
+          toast(`Week ${n} is open. It shows up once week ${S.week?.week?.week_number} is settled.`, 'ok', 7000);
+        }
         render();
       } catch (err) {
         toast(err.message, 'err');

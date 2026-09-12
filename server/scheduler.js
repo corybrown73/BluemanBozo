@@ -16,7 +16,7 @@
  */
 
 const cron = require('node-cron');
-const { db, getSetting, activeSeason, currentWeek } = require('./db');
+const { db, getSetting, activeSeason, currentWeek, pickWeek } = require('./db');
 const game = require('./game');
 const digest = require('./digest');
 const odds = require('./odds');
@@ -71,9 +71,11 @@ function alreadyRanForWeek(jobKey, weekId) {
 
 /** Tuesday may need to create the week before it can announce it. */
 function ensureWeekForOpen() {
-  let week = currentWeek();
-  if (week && week.status === 'open') return week;
-  if (getSetting('auto_open_week') !== '1') return week;
+  // The week people pick in, not the one still being graded — those can be
+  // different weeks on a Tuesday, and the summons must go out for the right one.
+  const week = pickWeek();
+  if (week) return week;
+  if (getSetting('auto_open_week') !== '1') return null;
 
   const season = activeSeason();
   const next = db
@@ -113,7 +115,7 @@ async function runJob(jobKey, { dryRun = false, late = false, force = false } = 
   try {
     // Scheduled and catch-up sends are once per week; a manual "Send now" may repeat.
     if (!force) {
-      const wk = currentWeek();
+      const wk = pickWeek();
       if (wk && alreadyRanForWeek(jobKey, wk.id)) {
         return { ok: false, skipped: true, reason: `${jobKey} already went out for week ${wk.week_number}.` };
       }
@@ -127,13 +129,16 @@ async function runJob(jobKey, { dryRun = false, late = false, force = false } = 
 async function runJobInner(job, { dryRun, late }) {
   const jobKey = job.key;
 
-  let week = jobKey === 'open' ? ensureWeekForOpen() : currentWeek();
-
-  // currentWeek() falls back to the latest FINAL week when nothing is live.
-  // Emailing "Week 3 is open!" about a finished week, or re-pricing a dead
-  // ticket for the payer, is worse than sending nothing.
-  if (!week || week.status === 'final' || (jobKey === 'open' && week.status !== 'open')) {
-    const reason = !week ? 'No week to report on.' : `Week ${week.week_number} is ${week.status}.`;
+  // Every job here is about the week people are picking in. Last week may
+  // still be waiting on stat lines or a vote; that is the app's business, not
+  // the mailer's. Emailing "Week 3 is open!" about a finished week, or
+  // re-pricing a dead ticket for the payer, is worse than sending nothing.
+  let week = jobKey === 'open' ? ensureWeekForOpen() : pickWeek();
+  if (!week) {
+    const latest = currentWeek();
+    const reason = latest
+      ? `Week ${latest.week_number} is ${latest.status} — nothing is open for picks.`
+      : 'No week to report on.';
     if (!dryRun) recordRun(jobKey, { status: 'skipped', detail: reason });
     return { ok: false, skipped: true, reason };
   }
@@ -186,7 +191,8 @@ async function runJobInner(job, { dryRun, late }) {
  */
 async function catchUp() {
   if (getSetting('schedule_enabled') !== '1') return [];
-  const week = currentWeek();
+  // Catch-up is for the picks week, same as the jobs it re-fires.
+  const week = pickWeek();
   if (!week) return [];
 
   const ran = [];
@@ -337,7 +343,9 @@ function start() {
 function status() {
   const enabled = getSetting('schedule_enabled') === '1';
   const tz = getSetting('schedule_timezone') || 'America/New_York';
-  const week = currentWeek();
+  // The panel talks about the week the sends are for; when nothing is open
+  // for picks it still needs a week to name, so it falls back to the app's.
+  const week = pickWeek() || currentWeek();
 
   return {
     enabled,
