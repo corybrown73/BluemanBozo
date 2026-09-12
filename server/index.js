@@ -114,7 +114,13 @@ function start() {
     console.log(`\n  ✓ First run: created commissioner "${boot.username}" from ADMIN_USERNAME/ADMIN_PASSWORD.`);
     console.log('    Add everyone else in Commissioner → Members.');
   } else if (boot.status === 'refused') {
-    console.error(`\n  ⚠  Could not create the first commissioner: ${boot.detail}`);
+    // Credentials were supplied and are unusable, on an empty database. Booting
+    // anyway gives you a site that passes every health check and that nobody
+    // can sign in to — the worst kind of green. Stop here instead.
+    console.error(`\n  ✖  Could not create the first commissioner: ${boot.detail}`);
+    console.error('     ADMIN_USERNAME is a short login handle, not an email address.');
+    console.error('     Fix it and redeploy:  fly secrets set ADMIN_USERNAME=cory\n');
+    process.exit(1);
   }
 
   const userCount = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;

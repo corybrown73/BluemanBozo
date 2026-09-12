@@ -136,3 +136,13 @@ test('the server listens on PORT, so it can match whatever the host routes to', 
   assert.match(res.out, /listening on \S+:8080/, `expected a bind on 8080, got:\n${res.out}`);
   assert.match(res.out, /route to port 8080/, 'and it states the port the host must use');
 });
+
+test('an email as ADMIN_USERNAME stops the boot instead of serving a site nobody can enter', async () => {
+  const res = await bootWith({
+    SESSION_SECRET: 'a'.repeat(32),
+    ADMIN_USERNAME: 'corybrown73@yahoo.com',
+    ADMIN_PASSWORD: 'longenoughpassword',
+  });
+  assert.strictEqual(res.status, 1, 'it exits rather than booting with zero members');
+  assert.match(res.out, /not an email address/, 'and says what a username actually is');
+});
