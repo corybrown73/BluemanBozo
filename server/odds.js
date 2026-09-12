@@ -376,7 +376,7 @@ async function getEvents({ force = false } = {}) {
  * Returns a flattened, de-duplicated board: one row per player+market+side with
  * the best price across books.
  */
-async function getEventProps(eventId, { markets, force = false } = {}) {
+async function getEventProps(eventId, { markets, force = false, cacheOnly = false } = {}) {
   const regions = (getSetting('odds_regions') || 'us').split(',').map((s) => s.trim()).filter(Boolean);
   const marketList = resolveMarkets(markets);
 
@@ -396,6 +396,17 @@ async function getEventProps(eventId, { markets, force = false } = {}) {
     const stale = cacheGet(cacheKey, null);
     if (stale) return { ...normalizeProps(stale.data), cached: true, stale: true, fetched_at: stale.fetched_at, cost: 0 };
     throw new OddsApiError('No Odds API key configured.', 503);
+  }
+
+  // Only the commissioner spends credits. Everyone else reads what has already
+  // been pulled — otherwise six friends opening the app on a cold cache each
+  // trigger a paid fetch of the same board.
+  if (cacheOnly) {
+    const stale = cacheGet(cacheKey, null);
+    if (stale) {
+      return { ...normalizeProps(stale.data), cached: true, stale: true, fetched_at: stale.fetched_at, cost: 0 };
+    }
+    throw new OddsApiError('NOT_LOADED', 409);
   }
 
   const cost = marketList.length * regions.length;
@@ -570,7 +581,7 @@ function resolveMarkets(markets) {
  * Cached games cost nothing, so a second call right after the first is free.
  * Refuses to start a job that would breach the monthly cap.
  */
-async function getSlateProps({ markets, force = false, onlyEventIds = null } = {}) {
+async function getSlateProps({ markets, force = false, onlyEventIds = null, cacheOnly = false } = {}) {
   const { events } = await getEvents();
   const games = onlyEventIds ? events.filter((e) => onlyEventIds.includes(e.id)) : events;
   if (!games.length) return { games: [], props: [], cost: 0, failures: [], estimate: estimateSlate([], markets) };
@@ -578,7 +589,7 @@ async function getSlateProps({ markets, force = false, onlyEventIds = null } = {
   const estimate = estimateSlate(games, markets);
   const quota = quotaStatus();
 
-  if (!force && quota.local_cap > 0 && quota.used_this_month + estimate.estimated_cost > quota.local_cap) {
+  if (!cacheOnly && !force && quota.local_cap > 0 && quota.used_this_month + estimate.estimated_cost > quota.local_cap) {
     throw new OddsApiError(
       `Loading the full slate would cost ${estimate.estimated_cost} credits and push you past the ` +
         `${quota.local_cap}-credit monthly cap (${quota.used_this_month} used). Load games one at a time, ` +
@@ -596,7 +607,7 @@ async function getSlateProps({ markets, force = false, onlyEventIds = null } = {
   // named failure is far more useful than a burst that trips a 429 mid-slate.
   for (const ev of games) {
     try {
-      const res = await getEventProps(ev.id, { markets, force });
+      const res = await getEventProps(ev.id, { markets, force, cacheOnly });
       cost += res.cost || 0;
       const label = `${ev.away_team} @ ${ev.home_team}`;
       loaded.push({ ...ev, prop_count: res.props.length, cached: res.cached });
@@ -621,6 +632,14 @@ async function getSlateProps({ markets, force = false, onlyEventIds = null } = {
       a.market_label.localeCompare(b.market_label) ||
       String(a.selection).localeCompare(String(b.selection))
   );
+
+  // Per-game failures are normally partial — a named game missing from an
+  // otherwise good board. But when a member hits a board nobody has pulled,
+  // every game fails the same way and there is nothing to show. Say that
+  // plainly rather than returning an empty board with a list of errors.
+  if (cacheOnly && !props.length && failures.length && failures.every((f) => f.error === 'NOT_LOADED')) {
+    throw new OddsApiError('NOT_LOADED', 409);
+  }
 
   return { games: loaded, props, cost, failures, estimate, quota: quotaStatus() };
 }

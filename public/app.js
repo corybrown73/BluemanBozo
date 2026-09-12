@@ -171,7 +171,12 @@ async function api(path, options = {}) {
     throw new Error('Signed out.');
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Something broke on our end. Try again.');
+  if (!res.ok) {
+    const err = new Error(data.error || 'Something broke on our end. Try again.');
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
   return data;
 }
 
@@ -202,6 +207,7 @@ const S = {
   props: null,
   propsLoading: false,
   propsError: null,
+  boardNotLoaded: false,
   propFilter: '',
   selectedProp: null,
   curve: null,        // alternate-line ladder for the selected prop
@@ -963,6 +969,22 @@ function propBoard() {
         <p class="tiny faint" style="margin-top:10px">Pulling this week's board…</p></div></div>`;
   }
   if (!S.props) {
+    if (S.boardNotLoaded) {
+      return html`<div class="card"><div class="empty">
+        <div class="big" aria-hidden="true">🕐</div>
+        <h2>The board isn't up yet</h2>
+        <p class="muted">${raw(
+          S.user.is_admin
+            ? 'Pull this week&rsquo;s numbers and everyone can start picking.'
+            : 'The commissioner pulls the numbers Saturday. Check back then.'
+        )}</p>
+        ${raw(
+          S.user.is_admin
+            ? '<button class="btn primary" id="pullBoard">Pull this week&rsquo;s board</button>'
+            : '<p class="tiny faint">You can still enter a pick by hand below.</p>'
+        )}
+      </div></div>`;
+    }
     return html`<div class="card">${raw(
       loadFailed('pick', S.propsError || "The board didn't load.")
     )}</div>`;
@@ -976,6 +998,19 @@ function propBoard() {
   const present = [...new Set(all.map((p) => p.market_group))].sort(
     (a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99)
   );
+  if (!all.length || !present.length) {
+    return html`<div class="card"><div class="card-head"><h2>Pick a player prop</h2></div>
+      <div class="empty">
+        <div class="big" aria-hidden="true">🕐</div>
+        <p class="muted">No props on the board yet.</p>
+        <p class="tiny faint">${raw(
+          S.user.is_admin
+            ? 'Nothing came back for this week&rsquo;s games. Try again, or enter a pick by hand below.'
+            : 'The commissioner pulls the numbers Saturday. You can still enter a pick by hand below.'
+        )}</p>
+        ${raw(S.user.is_admin ? '<button class="btn sm" id="pullBoard">Try again</button>' : '')}
+      </div></div>`;
+  }
   const category = present.includes(S.propCategory) ? S.propCategory : present[0];
 
   const filter = S.propFilter.trim().toLowerCase();
@@ -1063,7 +1098,7 @@ function propBoard() {
 
     ${raw(
       totalRows === 0
-        ? html`<div class="empty"><p class="muted">No ${esc(category.toLowerCase())} props match that search.</p></div>`
+        ? html`<div class="empty"><p class="muted">No ${esc(String(category || '').toLowerCase())} props match that search.</p></div>`
         : sections.map((sec) => propSection(sec, columns)).join('')
     )}
   </div>
@@ -1423,10 +1458,13 @@ async function loadSlateEstimate() {
   }
 }
 
-async function loadSlate(force = false) {
+async function loadSlate(force = false, { confirmCost = false } = {}) {
   S.propsError = null;
+  S.boardNotLoaded = false;
+  // Only the commissioner can spend, and only a deliberate press should ask.
+  // An automatic load must never throw up a dialog nobody asked for.
   const est = S.slateEstimate;
-  if (est && est.estimated_cost > 0) {
+  if (confirmCost && S.user.is_admin && est && est.estimated_cost > 0) {
     const ok = confirm(
       `Load props for ${est.games_to_fetch} game${est.games_to_fetch === 1 ? '' : 's'}?\n\n` +
         `Cost: ${est.estimated_cost} credits (${est.cost_per_game} per game × ${est.markets} markets).\n` +
@@ -1453,7 +1491,13 @@ async function loadSlate(force = false) {
     );
     if (data.failures?.length) toast(`${data.failures.length} game${data.failures.length === 1 ? '' : 's'} failed to load.`, 'err', 6000);
   } catch (err) {
-    toast(err.message, 'err', 8000);
+    if (err.data?.not_loaded) {
+      // Nothing has been pulled yet. That is a state, not a failure.
+      S.boardNotLoaded = true;
+    } else {
+      S.propsError = err.message;
+      toast(err.message, 'err', 8000);
+    }
   } finally {
     S.slateLoading = false;
     render();
@@ -1488,6 +1532,11 @@ async function autoLoadBoard() {
   if (S.eventsState !== 'ready' || !S.events.length) return;
   if (S.slateLoading || S.propSource === 'slate') return;
   if (S.props && S.props.props?.length) return;
+  // Already tried and it did not work. Retrying on every re-render is an
+  // infinite loop that never lets the failure reach the screen.
+  if (S.boardNotLoaded || S.propsError) return;
+  // Members read whatever has been pulled; only the commissioner can spend
+  // credits, so a cold cache is a message to them rather than a silent charge.
   loadSlate(false);
 }
 
@@ -1505,7 +1554,15 @@ function wirePick() {
   // Commissioner-only: bypass the cache and re-price the whole board. Costs
   // credits, so it stays a deliberate act rather than something automatic.
   const forceBtn = $('#forceProps');
-  if (forceBtn) forceBtn.addEventListener('click', () => loadSlate(true));
+  if (forceBtn) forceBtn.addEventListener('click', () => loadSlate(true, { confirmCost: true }));
+
+  const pullBoard = $('#pullBoard');
+  if (pullBoard) {
+    pullBoard.addEventListener('click', () => {
+      S.boardNotLoaded = false;
+      loadSlate(false, { confirmCost: true });
+    });
+  }
 
   const filter = $('#propFilter');
   if (filter) {

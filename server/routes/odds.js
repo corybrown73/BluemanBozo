@@ -39,15 +39,21 @@ function requestedMarkets(req) {
   return String(req.query.markets).split(',');
 }
 
-// Costs (markets x regions) credits on a cache miss.
+// Costs (markets x regions) credits on a cache miss — and only the
+// commissioner is allowed to incur that. Members read the cache.
 router.get('/events/:eventId/props', async (req, res) => {
   try {
     const markets = requestedMarkets(req);
     const force = req.query.force === '1' && req.user.is_admin;
-    const result = await odds.getEventProps(req.params.eventId, { markets, force });
+    const result = await odds.getEventProps(req.params.eventId, {
+      markets, force, cacheOnly: !req.user.is_admin,
+    });
     const tagged = await roster.tagProps(result.props);
     res.json({ ...result, roster_available: tagged.roster_available, quota: odds.quotaStatus() });
   } catch (err) {
+    if (err.message === 'NOT_LOADED') {
+      return res.status(409).json({ error: "This week's board hasn't been pulled yet.", not_loaded: true });
+    }
     res.status(err.status || 500).json({ error: err.message });
   }
 });
@@ -63,15 +69,22 @@ router.get('/slate/estimate', async (req, res) => {
   }
 });
 
-// Every game's props in one board. Costs (uncached games x markets x regions).
+// Every game's props in one board. Costs (uncached games x markets x regions),
+// so members are served from the cache and never trigger a paid pull.
 router.get('/slate', async (req, res) => {
   try {
     const markets = requestedMarkets(req);
     const force = req.query.force === '1' && req.user.is_admin;
-    const result = await odds.getSlateProps({ markets, force });
+    const result = await odds.getSlateProps({ markets, force, cacheOnly: !req.user.is_admin });
     const tagged = await roster.tagProps(result.props);
     res.json({ ...result, roster_available: tagged.roster_available, quota: odds.quotaStatus() });
   } catch (err) {
+    if (err.message === 'NOT_LOADED') {
+      return res.status(409).json({
+        error: "This week's board hasn't been pulled yet.",
+        not_loaded: true,
+      });
+    }
     res.status(err.status || 500).json({ error: err.message });
   }
 });
