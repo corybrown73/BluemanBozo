@@ -2990,15 +2990,16 @@ function applyTheme(mode) {
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
   try {
-    if (mode === 'light' || mode === 'dark') localStorage.setItem('bmb_theme', mode);
-    else localStorage.removeItem('bmb_theme');
+    // 'auto' is stored explicitly: an absent key means "never chose", which
+    // now lands on the brand's dark rather than on the system.
+    localStorage.setItem('bmb_theme', mode === 'light' || mode === 'dark' ? mode : 'auto');
   } catch { /* private mode */ }
 }
 
 function wireThemeToggle() {
   let saved = null;
   try { saved = localStorage.getItem('bmb_theme'); } catch { saved = null; }
-  applyTheme(saved);
+  applyTheme(saved === 'auto' ? null : saved || 'dark');
   $$('.theme-btn').forEach((b) => b.addEventListener('click', () => applyTheme(b.dataset.theme === 'auto' ? null : b.dataset.theme)));
 }
 

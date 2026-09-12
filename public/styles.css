@@ -1,47 +1,56 @@
 /* ==========================================================================
    Blue Man Bozo — visual system
-   Modelled on Stripe: near-white ground, flat white cards with hairline
-   borders, slate text, one violet, a gradient reserved for a single hero
-   moment, pill buttons, underlined tabs, quiet type at 500/600.
+   Built from the logo: a near-black field with a blue cast, electric blue
+   lettering, white script, a gold crown and green ticks on the parlay slips.
+   Dark first, because that is where the mark lives. Loud in three places —
+   the ticket, the week heading, the Bozo Index — and quiet everywhere else.
    ========================================================================== */
 
-/* ---------- tokens: light ---------- */
+/* ---------- tokens: dark, the default ---------- */
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 
-  --bg:             #f6f9fc;
-  --surface:        rgba(255, 255, 255, .74);
-  --surface-solid:  #ffffff;
-  --surface-2:      rgba(246, 249, 252, .82);
+  --bg:             #080c14;   /* black with a blue cast, not pure black */
+  --surface:        rgba(120, 165, 255, .055);
+  --surface-solid:  #111a28;
+  --surface-2:      rgba(120, 165, 255, .035);
   --blur:           saturate(180%) blur(20px);
-  --border:         #e3e8ee;
-  --border-strong:  #cfd7df;
+  --border:         #1d2a3d;
+  --border-strong:  #2c3d56;
 
-  --text:           #0a2540;
-  --text-2:         #425466;
-  --text-3:         #5f6d84;   /* 4.96:1 on --bg; #8898aa was 2.79:1 and failed AA */
+  --text:           #f2f6fc;
+  --text-2:         #aebcd0;
+  --text-3:         #8595ad;   /* 6.4:1 on --bg */
   --on-brand:       #ffffff;
 
-  --brand:          #635bff;
-  --brand-hover:    #5851e6;
-  --brand-tint:     rgba(99, 91, 255, .10);
-  --brand-ring:     rgba(99, 91, 255, .28);
+  /* The logo blue. --brand is the accent you read; --brand-fill is the one
+     that carries white text at 5.1:1, since the bright one only manages 3.9. */
+  --brand:          #3d8bff;
+  --brand-fill:     #1569e0;
+  --brand-hover:    #2f7ef0;
+  --brand-tint:     rgba(61, 139, 255, .14);
+  --brand-ring:     rgba(61, 139, 255, .38);
+  --brand-glow:     0 0 24px rgba(45, 125, 255, .35);
 
-  --green:          #0e6245;
-  --green-tint:     #d7f7c2;
-  --red:            #b3093c;
-  --red-tint:       #fde2dd;
-  --orange:         #9a4e00;
-  --orange-tint:    #fcedb9;
-  --blue:           #0055bc;
-  --blue-tint:      #d6ecff;
+  /* The crown. Reserved for the bozo and nothing else. */
+  --gold:           #ffc233;
+  --gold-tint:      rgba(255, 194, 51, .14);
 
-  --gradient:       linear-gradient(100deg, #635bff 0%, #ff5996 55%, #ff7a00 100%);
-  --band:           linear-gradient(180deg, rgba(99, 91, 255, .10) 0%, rgba(255, 89, 150, .05) 45%, rgba(246, 249, 252, 0) 100%);
+  --green:          #3ddc84;   /* the ticks on the parlay slips */
+  --green-tint:     rgba(61, 220, 132, .14);
+  --red:            #ff6b81;
+  --red-tint:       rgba(255, 107, 129, .14);
+  --orange:         #ffb02e;
+  --orange-tint:    rgba(255, 176, 46, .14);
+  --blue:           #3d8bff;
+  --blue-tint:      rgba(61, 139, 255, .14);
 
-  --shadow-sm:      0 1px 2px rgba(50, 50, 93, .06), 0 1px 1px rgba(0, 0, 0, .04);
-  --shadow:         0 4px 12px rgba(50, 50, 93, .08), 0 1px 3px rgba(0, 0, 0, .05);
-  --shadow-lg:      0 15px 35px rgba(50, 50, 93, .12), 0 5px 15px rgba(0, 0, 0, .07);
+  --gradient:       linear-gradient(100deg, #1569e0 0%, #3d8bff 55%, #7cc0ff 100%);
+  --band:           linear-gradient(180deg, rgba(61, 139, 255, .16) 0%, rgba(61, 139, 255, .04) 45%, rgba(8, 12, 20, 0) 100%);
+
+  --shadow-sm:      0 1px 2px rgba(0, 0, 0, .45);
+  --shadow:         0 4px 14px rgba(0, 0, 0, .5), 0 1px 3px rgba(0, 0, 0, .4);
+  --shadow-lg:      0 18px 40px rgba(0, 0, 0, .6), 0 6px 16px rgba(0, 0, 0, .45);
 
   --r:      16px;
   --r-sm:   12px;
@@ -49,66 +58,78 @@
   --r-xs:   9px;
   --tap:    44px;          /* the floor for anything you tap on a phone */
   --font:   Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", system-ui, sans-serif;
+  --display: "Archivo Black", Impact, "Haettenschweiler", "Arial Narrow Bold", sans-serif;
   --mono:   ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
-/* ---------- tokens: dark ---------- */
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg:             #0b0f19;
-  --surface:        rgba(255, 255, 255, .055);
-  --surface-solid:  #141a24;
-  --surface-2:      rgba(255, 255, 255, .035);
-  --border:         #262f3d;
-  --border-strong:  #344054;
-  --text:           #f1f5f9;
-  --text-2:         #a3aebf;
-  --text-3:         #7b8ba1;   /* 5.52:1 on --bg; #6b7a90 was 4.39:1 */
-  --brand:          #7a73ff;
-  --brand-hover:    #8d87ff;
-  --brand-tint:     rgba(122, 115, 255, .16);
-  --brand-ring:     rgba(122, 115, 255, .35);
-  --green:          #4ade80;
-  --green-tint:     rgba(74, 222, 128, .14);
-  --red:            #f87171;
-  --red-tint:       rgba(248, 113, 113, .14);
-  --orange:         #fbbf24;
-  --orange-tint:    rgba(251, 191, 36, .14);
-  --blue:           #60a5fa;
-  --blue-tint:      rgba(96, 165, 250, .14);
-  --band:           linear-gradient(180deg, rgba(122, 115, 255, .14) 0%, rgba(255, 89, 150, .06) 45%, rgba(11, 15, 25, 0) 100%);
-  --shadow-sm:      0 1px 2px rgba(0, 0, 0, .3);
-  --shadow:         0 4px 12px rgba(0, 0, 0, .35), 0 1px 3px rgba(0, 0, 0, .3);
-  --shadow-lg:      0 15px 35px rgba(0, 0, 0, .5), 0 5px 15px rgba(0, 0, 0, .35);
+/* ---------- tokens: light, for anyone who wants it ---------- */
+/* Same set, re-valued. Nothing below this line references a literal colour. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg:             #f4f7fb;
+  --surface:        rgba(255, 255, 255, .74);
+  --surface-solid:  #ffffff;
+  --surface-2:      rgba(244, 247, 251, .82);
+  --border:         #dbe3ee;
+  --border-strong:  #c3cfe0;
+  --text:           #0a1628;
+  --text-2:         #3d4d63;
+  --text-3:         #5c6b80;
+  --brand:          #0b5ed7;
+  --brand-fill:     #0b5ed7;
+  --brand-hover:    #0a52bd;
+  --brand-tint:     rgba(11, 94, 215, .10);
+  --brand-ring:     rgba(11, 94, 215, .30);
+  --brand-glow:     none;
+  --gold:           #8a5a00;
+  --gold-tint:      rgba(255, 194, 51, .20);
+  --green:          #0e6245;
+  --green-tint:     #d7f7c2;
+  --red:            #b3093c;
+  --red-tint:       #fde2dd;
+  --orange:         #9a4e00;
+  --orange-tint:    #fcedb9;
+  --blue:           #0b5ed7;
+  --blue-tint:      #d6ecff;
+  --gradient:       linear-gradient(100deg, #0b5ed7 0%, #3d8bff 55%, #7cc0ff 100%);
+  --band:           linear-gradient(180deg, rgba(11, 94, 215, .10) 0%, rgba(61, 139, 255, .04) 45%, rgba(244, 247, 251, 0) 100%);
+  --shadow-sm:      0 1px 2px rgba(10, 22, 40, .06), 0 1px 1px rgba(0, 0, 0, .04);
+  --shadow:         0 4px 12px rgba(10, 22, 40, .08), 0 1px 3px rgba(0, 0, 0, .05);
+  --shadow-lg:      0 15px 35px rgba(10, 22, 40, .12), 0 5px 15px rgba(0, 0, 0, .07);
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --bg:             #0b0f19;
-    --surface:        rgba(255, 255, 255, .055);
-    --surface-solid:  #141a24;
-    --surface-2:      rgba(255, 255, 255, .035);
-    --border:         #262f3d;
-    --border-strong:  #344054;
-    --text:           #f1f5f9;
-    --text-2:         #a3aebf;
-    --text-3:         #7b8ba1;   /* 5.52:1 on --bg; #6b7a90 was 4.39:1 */
-    --brand:          #7a73ff;
-    --brand-hover:    #8d87ff;
-    --brand-tint:     rgba(122, 115, 255, .16);
-    --brand-ring:     rgba(122, 115, 255, .35);
-    --green:          #4ade80;
-    --green-tint:     rgba(74, 222, 128, .14);
-    --red:            #f87171;
-    --red-tint:       rgba(248, 113, 113, .14);
-    --orange:         #fbbf24;
-    --orange-tint:    rgba(251, 191, 36, .14);
-    --blue:           #60a5fa;
-    --blue-tint:      rgba(96, 165, 250, .14);
-    --band:           linear-gradient(180deg, rgba(122, 115, 255, .14) 0%, rgba(255, 89, 150, .06) 45%, rgba(11, 15, 25, 0) 100%);
-    --shadow-sm:      0 1px 2px rgba(0, 0, 0, .3);
-    --shadow:         0 4px 12px rgba(0, 0, 0, .35), 0 1px 3px rgba(0, 0, 0, .3);
-    --shadow-lg:      0 15px 35px rgba(0, 0, 0, .5), 0 5px 15px rgba(0, 0, 0, .35);
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg:             #f4f7fb;
+    --surface:        rgba(255, 255, 255, .74);
+    --surface-solid:  #ffffff;
+    --surface-2:      rgba(244, 247, 251, .82);
+    --border:         #dbe3ee;
+    --border-strong:  #c3cfe0;
+    --text:           #0a1628;
+    --text-2:         #3d4d63;
+    --text-3:         #5c6b80;
+    --brand:          #0b5ed7;
+    --brand-fill:     #0b5ed7;
+    --brand-hover:    #0a52bd;
+    --brand-tint:     rgba(11, 94, 215, .10);
+    --brand-ring:     rgba(11, 94, 215, .30);
+    --brand-glow:     none;
+    --gold:           #8a5a00;
+    --gold-tint:      rgba(255, 194, 51, .20);
+    --green:          #0e6245;
+    --green-tint:     #d7f7c2;
+    --red:            #b3093c;
+    --red-tint:       #fde2dd;
+    --orange:         #9a4e00;
+    --orange-tint:    #fcedb9;
+    --blue:           #0b5ed7;
+    --blue-tint:      #d6ecff;
+    --gradient:       linear-gradient(100deg, #0b5ed7 0%, #3d8bff 55%, #7cc0ff 100%);
+    --band:           linear-gradient(180deg, rgba(11, 94, 215, .10) 0%, rgba(61, 139, 255, .04) 45%, rgba(244, 247, 251, 0) 100%);
+    --shadow-sm:      0 1px 2px rgba(10, 22, 40, .06), 0 1px 1px rgba(0, 0, 0, .04);
+    --shadow:         0 4px 12px rgba(10, 22, 40, .08), 0 1px 3px rgba(0, 0, 0, .05);
+    --shadow-lg:      0 15px 35px rgba(10, 22, 40, .12), 0 5px 15px rgba(0, 0, 0, .07);
   }
 }
 
@@ -141,7 +162,8 @@ button { font: inherit; }
 .topbar-inner { max-width: 1040px; margin: 0 auto; padding: 12px 20px 0; display: flex; align-items: center; gap: 14px; }
 .topbar-inner + .topbar-inner { padding-top: 6px; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; margin-right: auto; min-width: 0; }
-.brand-mark { width: 30px; height: 30px; flex: none; border-radius: var(--r-xs); display: grid; place-items: center; font-size: 16px; background: var(--brand); color: #fff; }
+.brand-mark { width: 32px; height: 32px; flex: none; border-radius: var(--r-xs); display: grid; place-items: center; font-size: 17px; background: var(--brand-fill); color: #fff; overflow: hidden; box-shadow: var(--brand-glow); }
+.brand-mark img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .brand-text b { display: block; font-size: 15px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
 .brand-text span { display: block; font-size: 12.5px; color: var(--text-3); margin-top: -2px; }
 
@@ -213,7 +235,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
 .btn:hover:not(:disabled) { border-color: var(--border-strong); box-shadow: var(--shadow); }
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
-.btn.primary { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.btn.primary { background: var(--brand-fill); border-color: var(--brand-fill); color: var(--on-brand); box-shadow: var(--shadow-sm), var(--brand-glow); }
 .btn.primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
 .btn.danger { background: var(--red-tint); border-color: transparent; color: var(--red); box-shadow: none; }
 .btn.danger:hover:not(:disabled) { background: var(--red); color: #fff; }
@@ -291,8 +313,12 @@ button.rowbtn:hover { border-color: var(--border-strong); box-shadow: var(--shad
 button.rowbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-ring); }
 
 /* ---------- the ticket ---------- */
-.ticket { border: 1px solid var(--border); border-radius: var(--r); padding: 18px 20px; background: var(--surface-2); }
-.ticket .odds { font-size: 40px; font-weight: 600; letter-spacing: -.035em; line-height: 1; background: var(--gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.ticket { position: relative; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--r); padding: 18px 20px; background: var(--surface-2); }
+/* A thin blue rail, the one place the logo's glow shows up in the UI. */
+.ticket::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--brand); }
+.ticket.cashed::before { background: var(--green); }
+.ticket.dead::before { background: var(--red); }
+.ticket .odds { font-family: var(--display); font-size: 40px; font-weight: 400; letter-spacing: -.01em; line-height: 1; background: var(--gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .ticket.dead .odds, .ticket.cashed .odds { background: none; -webkit-background-clip: initial; background-clip: initial; }
 .ticket.dead .odds { color: var(--red); }
 .ticket.cashed .odds { color: var(--green); }
@@ -314,7 +340,7 @@ button.rowbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-r
 .status-strip.done { border-color: var(--green); }
 .status-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
 .status-head > div:first-child { flex: 1; min-width: 200px; }
-.status-head h2 { font-size: 26px; font-weight: 600; letter-spacing: -.03em; }
+.status-head h2 { font-family: var(--display); font-size: 26px; font-weight: 400; letter-spacing: 0; text-transform: uppercase; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 7px 14px 7px 10px; border-radius: var(--r-pill); border: 1px solid var(--border); background: var(--surface-solid); font-size: 13px; font-weight: 500; color: var(--text-2); cursor: default; }
 .chip .chip-av { font-size: 15px; line-height: 1; }
@@ -495,7 +521,7 @@ button.rowbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-r
   transition: color .15s, border-color .15s, background .15s;
 }
 .pill:hover { color: var(--text); border-color: var(--text-3); }
-.pill.active { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.pill.active { background: var(--brand-fill); border-color: var(--brand-fill); color: var(--on-brand); }
 
 /* group-by / side switches + search */
 .board-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
@@ -581,3 +607,11 @@ button.rowbtn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-r
   .board-search { min-width: 100%; order: 3; }
   .pill { padding: 8px 15px; font-size: 13.5px; }
 }
+
+/* ---------- the crown ----------
+   Gold appears in exactly one place: whoever is on the hook. Spending it
+   anywhere else is what turns an accent into decoration. */
+.bozo-crown { color: var(--gold); }
+.badge.gold { background: var(--gold-tint); color: var(--gold); border-color: transparent; }
+.pickrow.is-bozo { border-color: var(--gold); background: var(--gold-tint); }
+.payline-av { filter: drop-shadow(0 0 10px var(--brand-tint)); }

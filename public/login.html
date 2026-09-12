@@ -6,20 +6,26 @@
 <title>Blue Man Bozo — Sign In</title>
 <meta name="description" content="Bozo of the Week. Members only.">
 <meta name="robots" content="noindex, nofollow">
-<meta name="theme-color" content="#f6f9fc" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0b0f19" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#080c14">
+<meta name="theme-color" content="#f4f7fb" media="(prefers-color-scheme: light)">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤡</text></svg>">
 <script>
-  try { var t = localStorage.getItem('bmb_theme'); if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch (e) {}
+  // Dark is the brand. With nothing chosen we stamp it, rather than following
+  // an OS that reports "light" by default. "Match system" clears the stamp.
+  try {
+    var t = localStorage.getItem('bmb_theme');
+    document.documentElement.dataset.theme = (t === 'light' || t === 'dark') ? t : (t === 'auto' ? '' : 'dark');
+    if (t === 'auto') document.documentElement.removeAttribute('data-theme');
+  } catch (e) { document.documentElement.dataset.theme = 'dark'; }
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Loaded non-render-blocking. A stalled request to Google Fonts (ad blocker,
      captive portal, school or office proxy) otherwise holds up app.js forever
      and the page never boots at all. The system-font fallback covers the gap. -->
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet"
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"
       media="print" onload="this.media='all';this.onload=null">
-<noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet"></noscript>
+<noscript><link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"></noscript>
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -38,9 +44,9 @@
 <div class="login-wrap">
   <div class="login-card">
     <div class="logo">
-      <div class="mark">🤡</div>
+      <div class="mark"><img src="/logo.png" alt="Blue Man Bozo" style="width:100%;height:100%;object-fit:contain;border-radius:inherit" onerror="var p=this.parentNode;this.remove();if(p)p.textContent='🤡'"></div>
       <h1>Blue Man Bozo</h1>
-      <p>Bozo of the Week · members only</p>
+      <p>Same degens, different week</p>
     </div>
 
     <div id="error" class="login-error" hidden></div>
@@ -69,10 +75,10 @@
     var root = document.documentElement;
     if (mode === 'light' || mode === 'dark') root.dataset.theme = mode; else delete root.dataset.theme;
     document.querySelectorAll('.theme-btn').forEach(function (b) { var on = b.dataset.theme === (mode || 'auto'); b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
-    try { if (mode === 'light' || mode === 'dark') localStorage.setItem('bmb_theme', mode); else localStorage.removeItem('bmb_theme'); } catch (e) {}
+    try { localStorage.setItem('bmb_theme', mode === 'light' || mode === 'dark' ? mode : 'auto'); } catch (e) {}
   }
   var saved = null; try { saved = localStorage.getItem('bmb_theme'); } catch (e) {}
-  apply(saved);
+  apply(saved === 'auto' ? null : saved || 'dark');
   document.querySelectorAll('.theme-btn').forEach(function (b) {
     b.addEventListener('click', function () { apply(b.dataset.theme === 'auto' ? null : b.dataset.theme); });
   });
