@@ -280,7 +280,14 @@ function renderTabs() {
     .join('');
   $$('#tabs .tab').forEach((btn) =>
     btn.addEventListener('click', () => {
-      window.location.hash = btn.dataset.tab;
+      const key = btn.dataset.tab;
+      // Tapping the tab you are already on is how people ask a phone for
+      // fresh numbers. Nothing changes in the URL, so nothing would refetch.
+      if (key === S.tab) {
+        refreshQuietly({ force: true });
+        return;
+      }
+      window.location.hash = key;
     })
   );
 }
@@ -440,7 +447,7 @@ function ticket(parlay, week, payer) {
     </div>
     <div class="odds" style="margin:10px 0 6px">${parlay.american_display}</div>
     <div class="row tiny muted">
-      <span><b>${parlay.leg_count}</b> legs</span>
+      <span><b>${parlay.leg_count}</b> leg${raw(parlay.leg_count === 1 ? '' : 's')}</span>
       <span>·</span>
       <span>${money(parlay.stake_cents)} to win <b>${money(parlay.profit_cents)}</b></span>
       <span class="hide-sm">·</span>
@@ -458,8 +465,65 @@ function ticket(parlay, week, payer) {
  * member, checked or waiting, with the stragglers named. Shown while picks
  * are open or locked; once results are in, the board itself tells the story.
  */
+/**
+ * The same strip, for the other thing the group has to do each week. Results
+ * are in, and the first screen has to say so and ask for the vote — otherwise
+ * the only hint is a dot on a tab, and the bozo waits on a crown for days.
+ */
+function votingStrip() {
+  const w = S.week.week;
+  const roster = S.week.roster || [];
+  const votedIds = new Set((S.week.votes || []).map((v) => v.voter_id));
+  const voted = roster.filter((r) => votedIds.has(r.id));
+  const waiting = roster.filter((r) => !votedIds.has(r.id));
+  const mine = S.week.my_vote;
+  const top = S.week.candidates && S.week.candidates[0];
+
+  const headline = !waiting.length ? 'Everyone has voted' : `${voted.length} of ${roster.length} voted`;
+  const tone = !waiting.length ? 'done' : mine ? 'waiting' : 'you';
+
+  return html`<div class="status-strip ${tone}">
+    <div class="status-head">
+      <div>
+        <div class="eyebrow">Week ${w.week_number} · results are in</div>
+        <h2>${headline}</h2>
+        <div class="tiny muted" style="margin-top:3px">${raw(
+          top
+            ? `The index says <b>${esc(top.display_name)}</b> (${esc(top.bozo_score)}). The vote decides.`
+            : 'Nobody lost. The commissioner can close the week.'
+        )}</div>
+      </div>
+      ${raw(
+        !mine
+          ? '<a class="btn primary" href="#vote">Cast your vote</a>'
+          : S.user.is_admin
+          ? '<a class="btn" href="#vote">Crown the bozo</a>'
+          : `<span class="badge win" style="font-size:12px;padding:6px 12px">✅ You voted for ${esc(
+              userById(mine.nominee_id)?.display_name || ''
+            )}</span>`
+      )}
+    </div>
+    <div class="chips">
+      ${raw(
+        roster
+          .map(
+            (r) => html`<div class="chip ${votedIds.has(r.id) ? 'in' : 'out'} ${r.id === S.user.id ? 'me' : ''}" title="${
+              votedIds.has(r.id) ? 'Voted' : 'Has not voted'
+            }">
+              <span class="chip-av">${r.avatar}</span>
+              <span class="chip-name">${r.display_name}</span>
+              <span class="chip-state">${raw(votedIds.has(r.id) ? '✓' : '…')}</span>
+            </div>`
+          )
+          .join('')
+      )}
+    </div>
+  </div>`;
+}
+
 function statusStrip() {
   const w = S.week.week;
+  if (w.status === 'graded' && w.voting_open) return votingStrip();
   if (w.status !== 'open' && w.status !== 'locked') return '';
 
   const roster = S.week.roster || [];
@@ -584,7 +648,7 @@ function viewWeek() {
         { vote: 'group vote', 'vote-tiebreak': 'group vote (tiebreak by Bozo Index)', auto: 'the Bozo Index', commissioner: 'commissioner ruling' }[
           bozo.method
         ] || esc(bozo.method)
-      )}${raw(bozo.votes_received ? ` · ${esc(bozo.votes_received)} votes` : '')}</div>
+      )}${raw(bozo.votes_received ? ` · ${esc(bozo.votes_received)} vote${bozo.votes_received === 1 ? '' : 's'}` : '')}</div>
       <p class="roast">${bozo.roast}</p>
       <div class="tally">
         <div><b>${bozo.counts.season}</b><span>this season</span></div>
@@ -1048,7 +1112,7 @@ function refreshControl() {
     ? r.last.age_minutes < 1
       ? 'just now'
       : `${r.last.age_minutes}m ago`
-    : 'not yet';
+    : 'lines not pulled yet';
   const who = r.last ? (r.last.scheduled ? ' · auto' : ` · ${esc(r.last.by || '')}`) : '';
   const left = r.unlimited ? '' : ` · ${r.left} left`;
   return html`<span class="tiny faint refresh-meta">${raw(last)}${raw(who)}${raw(left)}</span>
@@ -1475,7 +1539,7 @@ function confirmPanel() {
   const sides = meta?.sides || (p.market_type === 'yesno' ? ['Yes', 'No'] : ['Over', 'Under']);
 
   return html`<div class="card confirm-card">
-    <div class="card-head"><h2>2 · Confirm your pick</h2><div class="spacer"></div>
+    <div class="card-head"><h2>Confirm your pick</h2><div class="spacer"></div>
       <button class="btn sm ghost" id="clearProp">Cancel</button></div>
     <div class="card tight accent-edge" style="margin:0 0 12px">
       <div class="row" style="margin-bottom:${raw(S.curve ? '12px' : '0')}">
@@ -2242,22 +2306,11 @@ function viewVote() {
       )}
 
       ${raw(
-        cands.length
-          ? html`<hr class="sep">
-            <div class="row">
-              <span class="tiny faint">Nominate someone else.</span>
-              <select id="voteOther" style="width:auto;min-width:190px">
-                <option value="">Pick a member…</option>
-                ${raw(
-                  S.users
-                    .filter((u) => u.id !== S.user.id || S.settings.allow_self_vote)
-                    .map((u) => html`<option value="${u.id}">${u.avatar} ${u.display_name}</option>`)
-                    .join('')
-                )}
-              </select>
-              <button class="btn sm" id="voteOtherBtn">Vote</button>
-              ${raw(myVote ? '<button class="btn sm ghost" id="clearVote">Retract my vote</button>' : '')}
-            </div>`
+        // Only a loser can be the bozo, and every loser is a card above. A
+        // dropdown of the whole group offered winners and no-shows, which the
+        // server now refuses — so it only ever produced an error.
+        myVote
+          ? html`<hr class="sep"><div class="row"><button class="btn sm ghost" id="clearVote">Retract my vote</button></div>`
           : ''
       )}
     </div>
@@ -2313,15 +2366,6 @@ function wireVote() {
   $$('[data-vote]').forEach((btn) =>
     btn.addEventListener('click', () => castVote(Number(btn.dataset.vote)))
   );
-
-  const otherBtn = $('#voteOtherBtn');
-  if (otherBtn) {
-    otherBtn.addEventListener('click', () => {
-      const id = Number($('#voteOther').value);
-      if (!id) return toast('Choose someone first.', 'err');
-      castVote(id);
-    });
-  }
 
   const clear = $('#clearVote');
   if (clear) {
@@ -2797,6 +2841,13 @@ function viewAdmin() {
       )}
     </div>
 
+    <details class="card disclosure setup-fold">
+      <summary>
+        <span><b>Setup</b>
+          <span class="tiny faint">Odds API, group settings, weekly schedule, spreadsheet import, notifications. Set once and leave it.</span>
+        </span>
+      </summary>
+      <div class="disclosure-body">
     <div class="card">
       <div class="card-head"><h2>Odds API</h2><div class="spacer"></div>${raw(quotaBar())}</div>
       <div class="grid two">
@@ -2899,6 +2950,8 @@ function viewAdmin() {
         <button class="btn sm" id="sendTest">Send test</button>
       </div>
     </div>
+      </div>
+    </details>
   `;
 }
 
@@ -3131,7 +3184,7 @@ function gradePanel() {
     ${raw(
       picks
         .map(
-          (p) => html`<div class="pickrow">
+          (p) => html`<div class="pickrow grading">
             <span class="av" aria-hidden="true">${p.avatar}</span>
             <div class="who">
               <b>${p.display_name}</b>

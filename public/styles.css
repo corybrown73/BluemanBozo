@@ -712,3 +712,15 @@ button.board-section-head .spacer { flex: 1; }
 .grade-cell { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .void-toggle.on { border-color: var(--text-3); color: var(--text); background: var(--surface-2); }
 .statline:disabled { opacity: .4; }
+
+/* grading on a phone: the bet reads across, the number box and DNP drop under it.
+   Squeezed side by side, the description wrapped one letter per line. */
+.pickrow.grading { flex-wrap: wrap; }
+.pickrow.grading .who { flex: 1 1 170px; }
+@media (max-width: 560px) {
+  .pickrow.grading .grade-cell { flex: 1 0 100%; justify-content: flex-end; padding-left: 42px; }
+}
+
+/* the commissioner's set-once sections live folded under one heading */
+.setup-fold .disclosure-body > .card { margin: 0 0 12px; }
+.setup-fold .disclosure-body > .card:last-child { margin-bottom: 0; }
