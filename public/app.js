@@ -1226,13 +1226,19 @@ function propBoard() {
   const sections = groupProps(matched, groupBy, slate);
   const totalRows = sections.reduce((n, sec) => n + sec.rows.length, 0);
 
-  const cacheNote = slate
-    ? S.props.cost === 0
-      ? `${S.props.games.length} games · cached`
-      : `${S.props.games.length} games · ${S.props.cost} credits`
-    : S.props.cached
-    ? 'cached'
-    : `${S.props.cost} credits`;
+  // How many bets moved since the last pull — one per player+market, not one
+  // per side, or every move would count twice.
+  const movedCount = new Set(
+    all.filter((q) => q.line_move || (q.line === null && q.price_move)).map((q) => `${q.market}|${q.player}`)
+  ).size;
+  const cacheNote =
+    (slate
+      ? S.props.cost === 0
+        ? `${S.props.games.length} games · cached`
+        : `${S.props.games.length} games · ${S.props.cost} credits`
+      : S.props.cached
+      ? 'cached'
+      : `${S.props.cost} credits`) + (movedCount ? ` · ${movedCount} moved` : '');
 
   return html`<div class="card board">
     <div class="card-head">
@@ -1510,6 +1516,10 @@ function propCell(sides, column) {
   const entry = shortlistEntryFor(pick);
   const starring = S.shortlistMode;
   const bet = `${esc(pick.player)} ${esc(pick.selection)} ${line !== null ? esc(line) : ''} ${esc(column.label)}`;
+  // Which way the number went since the last pull. A line moves; a Yes/No
+  // market has no line, so its price stands in.
+  const move = line !== null ? pick.line_move : pick.price_move;
+  const wasText = !move ? '' : line !== null ? `was ${esc(pick.prev_line)}` : `was ${esc(oddsStr(pick.prev_price))}`;
 
   // In shortlist mode the whole cell toggles, so the tap target stays the
   // size it already is rather than becoming a star the size of a fingernail.
@@ -1519,8 +1529,15 @@ function propCell(sides, column) {
     ${raw(starring ? html`aria-pressed="${entry ? 'true' : 'false'}"` : '')}
     aria-label="${raw(starring ? (entry ? 'Remove ' : 'Add ') : '')}${raw(bet)} ${oddsStr(pick.price)}${raw(
       starring ? ' to your shortlist' : ''
-    )}">
+    )}${raw(move ? `, moved ${move > 0 ? 'up' : 'down'}, ${wasText}` : '')}">
     ${raw(entry ? '<span class="cell-star" aria-hidden="true">★</span>' : '')}
+    ${raw(
+      move
+        ? html`<span class="cell-move ${move > 0 ? 'up' : 'down'}" title="${wasText}" aria-hidden="true">${raw(
+            move > 0 ? '▲' : '▼'
+          )}</span>`
+        : ''
+    )}
     ${raw(line !== null ? html`<span class="cell-line">${line}</span>` : '')}
     <span class="cell-price">${raw(line !== null ? `${esc(pick.selection[0])} ` : '')}${oddsStr(pick.price)}</span>
   </button>`;
@@ -1555,6 +1572,15 @@ function confirmPanel() {
           <div class="tiny muted">${p.market_label} · ${p.selection}${raw(
             p.game_label ? ` · ${esc(p.game_label)}` : ''
           )}</div>
+          ${raw(
+            p.line_move
+              ? html`<div class="tiny ${p.line_move > 0 ? 'text-up' : 'text-down'}">${raw(p.line_move > 0 ? '▲' : '▼')}
+                  Line was ${p.prev_line} at the last pull</div>`
+              : (p.line === null || p.line === undefined) && p.price_move
+              ? html`<div class="tiny ${p.price_move > 0 ? 'text-up' : 'text-down'}">${raw(p.price_move > 0 ? '▲' : '▼')}
+                  Price was ${oddsStr(p.prev_price)} at the last pull</div>`
+              : ''
+          )}
         </div>
         <div style="text-align:right">
           <div class="mono" style="font-size:22px;font-weight:600">${raw(

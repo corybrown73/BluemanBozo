@@ -263,10 +263,66 @@ function cacheGet(key, maxAgeMinutes) {
 }
 
 function cacheSet(key, data) {
+  // A props pull keeps the board it replaces, so every row can say which way
+  // its number went since the last pull. That is all the arrows are: this
+  // pull against the one before. A pull that changes nothing shows nothing.
+  if (key.startsWith('props:') && !key.endsWith(':prev')) {
+    const old = db.prepare('SELECT payload, fetched_at FROM odds_cache WHERE cache_key = ?').get(key);
+    if (old) {
+      db.prepare(
+        `INSERT INTO odds_cache (cache_key, payload, fetched_at) VALUES (?, ?, ?)
+         ON CONFLICT(cache_key) DO UPDATE SET payload = excluded.payload, fetched_at = excluded.fetched_at`
+      ).run(`${key}:prev`, old.payload, old.fetched_at);
+    }
+  }
   db.prepare(
     `INSERT INTO odds_cache (cache_key, payload, fetched_at) VALUES (?, ?, datetime('now'))
      ON CONFLICT(cache_key) DO UPDATE SET payload = excluded.payload, fetched_at = excluded.fetched_at`
   ).run(key, JSON.stringify(data));
+}
+
+/** American odds as the probability the book is charging for. */
+const chargedProb = (american) => {
+  const n = Number(american);
+  if (!Number.isFinite(n) || n === 0) return null;
+  return n > 0 ? 100 / (n + 100) : Math.abs(n) / (Math.abs(n) + 100);
+};
+
+/**
+ * Stamp each row with where its number stood at the pull before this one.
+ *
+ *   line_move   +1 the line went up, -1 down, 0 unchanged, null no earlier pull
+ *   price_move  same, for the price — measured as probability, so -110 → -120
+ *               and +160 → +140 both read as "shorter"
+ *
+ * Yes/No markets have no line, so the price is the only thing that can move.
+ */
+function withMovement(normalized, cacheKey) {
+  const prev = cacheGet(`${cacheKey}:prev`, null);
+  if (!prev) return normalized;
+  let before;
+  try {
+    before = normalizeProps(prev.data).props;
+  } catch {
+    return normalized;
+  }
+  const was = new Map(before.map((q) => [`${q.market}|${q.player}|${q.selection}`, q]));
+  const props = normalized.props.map((q) => {
+    const old = was.get(`${q.market}|${q.player}|${q.selection}`);
+    if (!old) return { ...q, prev_line: null, prev_price: null, prev_at: null, line_move: null, price_move: null };
+    const hasLine = q.line !== null && q.line !== undefined && old.line !== null && old.line !== undefined;
+    const a = chargedProb(q.price);
+    const b = chargedProb(old.price);
+    return {
+      ...q,
+      prev_line: hasLine ? old.line : null,
+      prev_price: old.price ?? null,
+      prev_at: prev.fetched_at,
+      line_move: hasLine ? Math.sign(Number(q.line) - Number(old.line)) : null,
+      price_move: a !== null && b !== null ? Math.sign(a - b) : null,
+    };
+  });
+  return { ...normalized, props };
 }
 
 /* ------------------------------------------------------------------ */
@@ -444,17 +500,18 @@ async function getEventProps(eventId, { markets, force = false, cacheOnly = fals
 
   const ttl = parseInt(getSetting('props_cache_minutes'), 10) || 360;
   const cacheKey = `props:${eventId}:${regions.join(',')}:${[...marketList].sort().join(',')}`;
+  const serve = (payload) => withMovement(normalizeProps(payload), cacheKey);
 
   if (!force) {
     const hit = cacheGet(cacheKey, ttl);
     if (hit) {
-      return { ...normalizeProps(hit.data), cached: true, fetched_at: hit.fetched_at, cost: 0 };
+      return { ...serve(hit.data), cached: true, fetched_at: hit.fetched_at, cost: 0 };
     }
   }
 
   if (!hasApiKey()) {
     const stale = cacheGet(cacheKey, null);
-    if (stale) return { ...normalizeProps(stale.data), cached: true, stale: true, fetched_at: stale.fetched_at, cost: 0 };
+    if (stale) return { ...serve(stale.data), cached: true, stale: true, fetched_at: stale.fetched_at, cost: 0 };
     throw new OddsApiError('No Odds API key configured.', 503);
   }
 
@@ -464,7 +521,7 @@ async function getEventProps(eventId, { markets, force = false, cacheOnly = fals
   if (cacheOnly) {
     const stale = cacheGet(cacheKey, null);
     if (stale) {
-      return { ...normalizeProps(stale.data), cached: true, stale: true, fetched_at: stale.fetched_at, cost: 0 };
+      return { ...serve(stale.data), cached: true, stale: true, fetched_at: stale.fetched_at, cost: 0 };
     }
     throw new OddsApiError('NOT_LOADED', 409);
   }
@@ -482,11 +539,11 @@ async function getEventProps(eventId, { markets, force = false, cacheOnly = fals
       { endpoint: 'event-odds', credits: cost }
     );
     cacheSet(cacheKey, data);
-    return { ...normalizeProps(data), cached: false, fetched_at: new Date().toISOString(), cost };
+    return { ...serve(data), cached: false, fetched_at: new Date().toISOString(), cost };
   } catch (err) {
     const stale = cacheGet(cacheKey, null);
     if (stale) {
-      return { ...normalizeProps(stale.data), cached: true, stale: true, fetched_at: stale.fetched_at, cost: 0, error: err.message };
+      return { ...serve(stale.data), cached: true, stale: true, fetched_at: stale.fetched_at, cost: 0, error: err.message };
     }
     throw err;
   }
@@ -759,6 +816,8 @@ module.exports = {
   hasApiKey,
   OddsApiError,
   normalizeProps,
+  withMovement,
+  cacheSet,
   regroupTouchdowns,
   SPORT,
 };
