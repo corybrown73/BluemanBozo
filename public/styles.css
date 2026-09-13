@@ -733,45 +733,25 @@ button.board-section-head .spacer { flex: 1; }
   background: var(--surface-solid); color: var(--text);
 }
 
-/* ---- the confirm sheet: a bet slip that rides over the board ----
-   The board is two screens long on a full slate; the button that actually
-   locks the pick lived under all of it. Now it slides up from the bottom
-   with "Lock in" pinned to its foot, wherever you were on the board. */
-.sheet-backdrop {
-  position: fixed; inset: 0; z-index: 40;
-  background: rgba(4, 8, 16, .55);
-  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
-}
-.confirm-card.sheet {
-  position: fixed; left: 50%; bottom: 0; z-index: 41;
-  width: min(100%, 560px); max-height: min(88vh, 88dvh);
-  transform: translateX(-50%);
-  margin: 0; padding-bottom: 0;
-  overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
-  border-radius: var(--r) var(--r) 0 0;
-  border-bottom: 0;
+/* ---- the confirm slip: opens right under the row you tapped ----
+   Lock in stays pinned to the bottom of the screen while the slip is in view,
+   so nobody has to be told to scroll for it. */
+.confirm-card.inline {
+  margin: 6px 0 14px; padding-bottom: 0;
   background: var(--surface-solid);
-  box-shadow: var(--shadow-lg), 0 0 0 3px var(--brand-tint);
-  animation: sheet-up .22s ease-out;
+  scroll-margin-top: 150px;          /* clear the sticky header and the tapped row */
+  animation: slip-open .18s ease-out;
 }
-.confirm-card.sheet:focus { outline: none; }
-/* a grab-handle line, so it reads as a sheet you can dismiss */
-.confirm-card.sheet::before {
-  content: ''; display: block; width: 40px; height: 4px; margin: -8px auto 12px;
-  border-radius: 2px; background: var(--border-strong);
-}
+.confirm-card.inline:focus { outline: none; }
 .sheet-foot {
   position: sticky; bottom: 0; z-index: 1;
   margin: 14px -24px 0; padding: 10px 24px calc(14px + env(safe-area-inset-bottom, 0px));
   background: var(--surface-solid);
   border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--r) var(--r);
 }
-body.sheet-open { overflow: hidden; }
-@keyframes sheet-up { from { transform: translate(-50%, 24px); opacity: .6; } to { transform: translate(-50%, 0); opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .confirm-card.sheet { animation: none; } }
-@media (max-width: 600px) {
-  .confirm-card.sheet { width: 100%; }
-}
+@keyframes slip-open { from { transform: translateY(-6px); opacity: .4; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .confirm-card.inline { animation: none; } }
 
 /* which way a number went since the last pull */
 .cell-move { position: absolute; top: 3px; left: 5px; font-size: 9px; line-height: 1; pointer-events: none; }

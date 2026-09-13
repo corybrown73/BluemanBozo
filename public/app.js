@@ -1151,6 +1151,7 @@ function propBoard() {
 
   const slate = S.propSource === 'slate';
   const all = S.props.props;
+  confirmRendered = false;
   // A player who both runs and catches has his touchdown price filed under
   // Rushing and under Receiving, so the raw length counts that bet twice.
   const betCount = new Set(all.map((p) => `${p.market}|${p.player}|${p.selection}`)).size;
@@ -1333,7 +1334,7 @@ function propBoard() {
     )}
   </div>
 
-  ${raw(S.selectedProp !== null && S.props.props[S.selectedProp] ? confirmPanel() : '')}`;
+  ${raw(S.selectedProp !== null && S.props.props[S.selectedProp] && !confirmRendered ? confirmPanel() : '')}`;
 }
 
 /** Pivot the flat prop list into sections → player rows → per-market cells. */
@@ -1409,19 +1410,46 @@ function propSection(section, columns, { forceOpen = false } = {}) {
             <span class="tiny faint">${count} player${raw(count === 1 ? '' : 's')}</span>
           </button>`
     )}
-    ${raw(
-      !open
-        ? ''
-        : html`<div class="board-grid" style="--cols:${raw(columns.length)}">
-            <div class="board-row board-head">
-              <div class="board-player"></div>
-              ${raw(columns.map((c) => html`<div class="board-col">${c.short}</div>`).join(''))}
-            </div>
-            ${raw(section.rows.map((row) => propRow(row, columns)).join(''))}
-          </div>`
-    )}
+    ${raw(!open ? '' : sectionGrid(section, columns))}
   </div>`;
 }
+
+/**
+ * The rows of one section — with the confirm slip opened directly under the
+ * row that was tapped, not at the foot of the board.
+ *
+ * A grid is a horizontal scroller, and the slip must not live inside one: its
+ * pinned Lock button would stick to the grid's edge instead of the screen,
+ * and the fade mask would clip it. So the rows split into two grids around
+ * the slip. Same column template, so they line up.
+ */
+function sectionGrid(section, columns) {
+  const selected = S.selectedProp !== null ? S.props.props[S.selectedProp] : null;
+  const at = selected
+    ? section.rows.findIndex((row) => [...row.cells.values()].some((sides) => Object.values(sides).includes(selected)))
+    : -1;
+
+  const grid = (rows, withHead) => html`<div class="board-grid" style="--cols:${raw(columns.length)}">
+    ${raw(
+      withHead
+        ? html`<div class="board-row board-head">
+            <div class="board-player"></div>
+            ${raw(columns.map((c) => html`<div class="board-col">${c.short}</div>`).join(''))}
+          </div>`
+        : ''
+    )}
+    ${raw(rows.map((row) => propRow(row, columns)).join(''))}
+  </div>`;
+
+  if (at === -1) return grid(section.rows, true);
+  confirmRendered = true;
+  const rest = section.rows.slice(at + 1);
+  return grid(section.rows.slice(0, at + 1), true) + confirmPanel() + (rest.length ? grid(rest, false) : '');
+}
+
+// Set while a board renders: did some section place the slip under its row?
+// If nothing did (the row was searched away), it falls back to the foot.
+let confirmRendered = false;
 
 function propRow(row, columns) {
   return html`<div class="board-row">
@@ -1556,12 +1584,10 @@ function confirmPanel() {
   const meta = S.marketCatalog?.find((m) => m.key === p.market);
   const sides = meta?.sides || (p.market_type === 'yesno' ? ['Yes', 'No'] : ['Over', 'Under']);
 
-  // A bottom sheet, not a card under the board: on a full slate the board is
-  // two screens long and the button to actually lock the pick was at the
-  // bottom of all of it. The sheet rides over the board with Lock in pinned
-  // to its foot, the way a bet slip does.
-  return html`<div class="sheet-backdrop" id="sheetBackdrop" aria-hidden="true"></div>
-  <div class="card confirm-card sheet" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" tabindex="-1">
+  // Opens directly under the row that was tapped (see sectionGrid), with the
+  // Lock button pinned to the bottom of the screen while the slip is in view.
+  // Nobody should have to be told to scroll down to find it.
+  return html`<div class="card confirm-card inline" role="region" aria-labelledby="confirmTitle" tabindex="-1">
     <div class="card-head"><h2 id="confirmTitle">Confirm your pick</h2><div class="spacer"></div>
       <button class="btn sm ghost" id="clearProp">Cancel</button></div>
     <div class="card tight accent-edge" style="margin:0 0 12px">
@@ -2164,6 +2190,7 @@ function wirePick() {
   $$('[data-prop]').forEach((btn) =>
     btn.addEventListener('click', () => {
       S.selectedProp = Number(btn.dataset.prop);
+      S.confirmJustOpened = true;
       S.curve = null;
       S.curveIndex = null;
       S.priceOverride = '';
@@ -2176,11 +2203,14 @@ function wirePick() {
 
   // Typed line: snap to the nearest rung, ties upward, and say what you got.
   $('#retryCurve')?.addEventListener('click', () => loadCurve());
-  $('#sheetBackdrop')?.addEventListener('click', () => $('#clearProp')?.click());
-  // On open, nothing is focused (the tapped cell was re-rendered away), so the
-  // sheet takes focus. Mid-interaction the slider keeps it, and we leave it.
-  const sheetEl = $('.confirm-card');
-  if (sheetEl && document.activeElement === document.body) sheetEl.focus({ preventScroll: true });
+  // Just opened: bring it up under the row so the whole slip is on screen,
+  // and give it focus. Re-renders from the slider leave the scroll alone.
+  const slip = $('.confirm-card');
+  if (slip && S.confirmJustOpened) {
+    S.confirmJustOpened = false;
+    slip.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    slip.focus({ preventScroll: true });
+  }
 
   const altLine = $('#lineInput');
   if (altLine && S.curve) {
@@ -3979,21 +4009,12 @@ function wireShame() {
 const WIRES = { week: wireWeek, pick: wirePick, vote: wireVote, shame: wireShame, history: wireHistory, admin: wireAdmin };
 
 function render() {
-  // The confirm sheet scrolls on its own, and re-renders on every slider
-  // tick. Without this each tick threw it back to the top.
-  const sheetBefore = $('.confirm-card');
-  const sheetScroll = sheetBefore ? sheetBefore.scrollTop : 0;
-
   renderTabs();
   $('#view').innerHTML = VIEWS[S.tab]();
   if (WIRES[S.tab]) WIRES[S.tab]();
-
-  const sheet = $('.confirm-card');
-  if (sheet && sheetScroll) sheet.scrollTop = sheetScroll;
-  document.body.classList.toggle('sheet-open', Boolean(sheet));
 }
 
-// The sheet closes the ways people expect a sheet to close.
+// Escape closes the open slip.
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && $('.confirm-card')) $('#clearProp')?.click();
 });
