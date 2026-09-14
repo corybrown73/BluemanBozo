@@ -243,6 +243,83 @@ function weekDetail(weekId, viewer) {
   };
 }
 
+/**
+ * Settle picks from stat lines. Used by the commissioner's Grade button and by
+ * the clock once games go final — same rules either way. A pick not in
+ * `results` is left exactly as it was. The week flips to 'graded' (voting
+ * opens) only when every pick is settled.
+ *
+ * @param {object} week
+ * @param {Array<{pick_id:number, actual_value?:any, result?:'void'}>} results
+ * @returns {{warnings: string[], settled: number, status: string}}
+ */
+function gradePicks(week, results) {
+  const update = db.prepare(
+    `UPDATE picks SET actual_value = @actual_value, result = @result, graded_at = datetime('now'),
+      updated_at = datetime('now') WHERE id = @id AND week_id = @week_id`
+  );
+  let settled = 0;
+  db.transaction((rows) => {
+    for (const row of rows) {
+      const pick = db.prepare('SELECT * FROM picks WHERE id = ? AND week_id = ?').get(row.pick_id, week.id);
+      if (!pick) continue;
+      if (row.result === 'void') {
+        update.run({ id: pick.id, week_id: week.id, actual_value: null, result: 'void' });
+        settled += 1;
+        continue;
+      }
+      const actual = scoring.toNum(row.actual_value);
+      const result = Number.isFinite(actual) ? scoring.gradePick(pick, actual) : 'pending';
+      update.run({ id: pick.id, week_id: week.id, actual_value: Number.isFinite(actual) ? actual : null, result });
+      if (result !== 'pending') settled += 1;
+    }
+  })(results);
+
+  const warnings = [];
+  for (const row of results) {
+    const pick = db.prepare('SELECT * FROM picks WHERE id = ? AND week_id = ?').get(row.pick_id, week.id);
+    if (!pick || row.result === 'void') continue;
+    const w = marketWarning(pick.market, scoring.toNum(row.actual_value));
+    if (w) warnings.push(`${pick.player}: ${w}`);
+  }
+
+  const picks = rawPicks(week.id);
+  const allSettled = picks.length > 0 && picks.every((p) => p.result !== 'pending');
+  if (allSettled && statusRank(week.status) < statusRank('graded')) {
+    db.prepare("UPDATE weeks SET status = 'graded' WHERE id = ?").run(week.id);
+  }
+  return { warnings, settled, status: getWeek(week.id).status };
+}
+
+/** "Is 812 passing yards plausible?" — lives in odds.js; required lazily to avoid a cycle. */
+function marketWarning(market, value) {
+  return require('./odds').actualWarning(market, value);
+}
+
+/**
+ * Where each pick stands mid-game. Written by the clock every few minutes
+ * from the box score; shown on the board; never graded from.
+ */
+function applyLive(weekId, { results = [], unresolved = [] } = {}) {
+  const stmt = db.prepare(
+    `UPDATE picks SET live_value = @live_value, live_note = @live_note, live_at = datetime('now')
+     WHERE id = @id AND week_id = @week_id`
+  );
+  const note = (r) => (r.final ? 'Final' : r.detail || (r.period ? `Q${r.period} ${r.clock || ''}`.trim() : 'In progress'));
+  let n = 0;
+  db.transaction(() => {
+    for (const r of results) {
+      stmt.run({ id: r.pick_id, week_id: weekId, live_value: r.actual_value, live_note: note(r) });
+      n += 1;
+    }
+    for (const u of unresolved) {
+      stmt.run({ id: u.pick_id, week_id: weekId, live_value: null, live_note: u.not_started ? null : u.reason || null });
+      n += 1;
+    }
+  })();
+  return n;
+}
+
 /** Season + all-time standings, with streaks and pick records. */
 function leaderboard({ seasonId = null } = {}) {
   const users = listUsers({ includeInactive: true });
@@ -466,6 +543,8 @@ module.exports = {
   getBozo,
   bozoCounts,
   weekDetail,
+  gradePicks,
+  applyLive,
   leaderboard,
   groupStats,
   bozoStreak,

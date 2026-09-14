@@ -9,6 +9,7 @@ const roastEngine = require('../roast');
 const notify = require('../notify');
 const odds = require('../odds');
 const shortlist = require('../shortlist');
+const calendar = require('../calendar');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -46,6 +47,8 @@ router.get('/state', (req, res) => {
     // Next week may already be open behind one still being settled. Named so
     // the pick tab can say when picking starts instead of just "locked".
     upcoming_week: week && week.status !== 'open' ? upcomingWeek(week) : null,
+    // What the clock will do next, so the screens can say it.
+    clock: require('../scheduler').clockStatus(),
     quota: odds.quotaStatus(),
     channels: notify.channelStatus(),
   });
@@ -86,6 +89,15 @@ router.post('/weeks', requireAdmin, (req, res) => {
 
   const stake = parseInt(req.body?.stake_cents, 10) || parseInt(getSetting('default_stake_cents'), 10) || 2000;
 
+  // No lock time given: the clock supplies Sunday 12:55 ET for that week,
+  // provided it is still ahead of us. A week opened after its own Sunday is
+  // left for the commissioner to time by hand rather than locked on arrival.
+  let lockAt = req.body?.lock_at || null;
+  if (!lockAt && getSetting('auto_lock') === '1') {
+    const at = calendar.lockAtFor(weekNumber, season.year, getSetting('lock_time_et') || '12:55');
+    if (at.getTime() > Date.now()) lockAt = at.toISOString();
+  }
+
   const info = db
     .prepare(
       `INSERT INTO weeks (season_id, week_number, label, status, lock_at, stake_cents, payer_user_id, notes)
@@ -95,7 +107,7 @@ router.post('/weeks', requireAdmin, (req, res) => {
       season.id,
       weekNumber,
       req.body?.label || null,
-      req.body?.lock_at || null,
+      lockAt,
       stake,
       prevBozo?.user_id || null,
       req.body?.notes || null
@@ -342,47 +354,8 @@ router.post('/weeks/:id/grade', requireAdmin, (req, res) => {
     }
   }
   const crowned = game.getBozo(week.id);
-
-  const update = db.prepare(
-    `UPDATE picks SET actual_value = @actual_value, result = @result, graded_at = datetime('now'),
-      updated_at = datetime('now') WHERE id = @id AND week_id = @week_id`
-  );
-
-  const apply = db.transaction((rows) => {
-    for (const row of rows) {
-      const pick = db.prepare('SELECT * FROM picks WHERE id = ? AND week_id = ?').get(row.pick_id, week.id);
-      if (!pick) continue;
-
-      // An explicit void stays void; everything else is derived from the stat line.
-      if (row.result === 'void') {
-        update.run({ id: pick.id, week_id: week.id, actual_value: null, result: 'void' });
-        continue;
-      }
-      const actual = scoring.toNum(row.actual_value);
-      const result = Number.isFinite(actual) ? scoring.gradePick(pick, actual) : 'pending';
-      update.run({
-        id: pick.id,
-        week_id: week.id,
-        actual_value: Number.isFinite(actual) ? actual : null,
-        result,
-      });
-    }
-  });
-  apply(results);
-
-  const warnings = [];
-  for (const row of results) {
-    const pick = db.prepare('SELECT * FROM picks WHERE id = ? AND week_id = ?').get(row.pick_id, week.id);
-    if (!pick || row.result === 'void') continue;
-    const w = odds.actualWarning(pick.market, scoring.toNum(row.actual_value));
-    if (w) warnings.push(`${pick.player}: ${w}`);
-  }
-
+  const { warnings } = game.gradePicks(week, results);
   const picks = game.rawPicks(week.id);
-  const allSettled = picks.length > 0 && picks.every((p) => p.result !== 'pending');
-  if (allSettled && game.statusRank(week.status) < game.statusRank('graded')) {
-    db.prepare("UPDATE weeks SET status = 'graded' WHERE id = ?").run(week.id);
-  }
 
   // A corrected stat line can turn the crowned bozo's loss into a win. The
   // crown cannot stand on a bet that didn't lose, so it comes off, the week

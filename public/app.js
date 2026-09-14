@@ -226,6 +226,8 @@ const S = {
   // adds or removes a candidate, so three can be lined up in three taps.
   shortlistMode: false,
   shortlistBusy: false,
+  // A pick is in. The board stays out of the way until they say they mean it.
+  changingPick: false,
   manualMarket: null,   // market chosen in the by-hand form
   slateEstimate: null,
   slateLoading: false,
@@ -243,8 +245,11 @@ async function loadState() {
   S.settings = data.settings || {};
   S.users = data.users || [];
   S.season = data.season;
+  const prevWeekId = S.week?.week?.id;
   S.week = data.current_week;
   S.upcoming = data.upcoming_week || null;
+  S.clock = data.clock || null;
+  if (S.week?.week?.id !== prevWeekId) S.changingPick = false;
   S.quota = data.quota;
   S.channels = data.channels;
 }
@@ -391,6 +396,54 @@ function statusPill(status) {
   return html`<span class="statuspill ${status}">${labels[status] || status}</span>`;
 }
 
+
+/* ---------------------------------------------------------------------------
+ * Live: where a pick stands while its game is on. Filled by the clock from
+ * the box score every few minutes; never a result until the game is final.
+ * ------------------------------------------------------------------------- */
+
+function liveLine(p) {
+  if (p.result !== 'pending' || !p.live_note) return '';
+  const hasValue = p.live_value !== null && p.live_value !== undefined;
+  const ou = p.line !== null && p.line !== undefined;
+  let bar = '';
+  if (hasValue && ou && Number(p.line) > 0) {
+    const pct = Math.max(0, Math.min(100, (Number(p.live_value) / Number(p.line)) * 100));
+    const side = String(p.selection).toLowerCase();
+    const onTrack = side === 'over' ? Number(p.live_value) > Number(p.line) : Number(p.live_value) < Number(p.line);
+    bar = html`<div class="meter small live-meter ${onTrack ? 'good' : ''}"><i style="width:${raw(pct.toFixed(0))}%"></i></div>`;
+  }
+  const label = hasValue
+    ? `${esc(p.live_value)} ${esc(p.unit || '')} so far`
+    : esc(p.live_note);
+  const status = hasValue ? ` · ${esc(p.live_note)}` : '';
+  return html`<div class="tiny live-line"><span class="live-dot" aria-hidden="true"></span> ${raw(label)}${raw(status)}</div>${raw(bar)}`;
+}
+
+/** "Live · updated 2:15 PM" when the box scores have come in recently. */
+function liveBadge(picks) {
+  const latest = picks
+    .map((p) => (p.live_at ? Date.parse(p.live_at.replace(' ', 'T') + (p.live_at.endsWith('Z') ? '' : 'Z')) : 0))
+    .reduce((a, b) => Math.max(a, b), 0);
+  if (!latest || Date.now() - latest > 60 * 60000) return '';
+  const when = new Date(latest).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return html`<span class="badge live"><span class="live-dot" aria-hidden="true"></span> Live · updated ${when}</span>`;
+}
+
+
+/** What the clock is going to do, so the commissioner knows what not to bother with. */
+function clockLine() {
+  const c = S.clock;
+  if (!c) return '';
+  const bits = [];
+  if (c.auto_lock && c.next_lock_at) bits.push(`locks itself ${esc(fmtKickoff(c.next_lock_at))}`);
+  else if (c.auto_lock) bits.push(`locks itself Sundays at ${esc(c.lock_time_et)} ET`);
+  if (c.auto_open && c.next_open_at) bits.push(`week ${esc(c.next_open_week)} opens ${esc(fmtKickoff(c.next_open_at))}`);
+  if (c.live_stats) bits.push(`stats every ${esc(c.live_interval_minutes)} min during games, then grades itself`);
+  if (!bits.length) return '';
+  return html`<p class="tiny muted clock-line">🕒 On the clock: ${raw(bits.join(' · '))}. Everything below is the override.</p>`;
+}
+
 function pickRow(p, opts = {}) {
   const isMe = p.user_id === S.user.id;
   const isBozo = opts.bozoUserId === p.user_id;
@@ -410,6 +463,7 @@ function pickRow(p, opts = {}) {
       <div class="bet">${describePick(p)}${raw(
         p.trash_talk ? ` <em class="faint">“${esc(p.trash_talk)}”</em>` : ''
       )}</div>
+      ${raw(liveLine(p))}
     </div>
     <div class="num">
       <div class="big" aria-hidden="true">${oddsStr(p.price)}</div>
@@ -730,6 +784,7 @@ function viewWeek() {
     <div class="card-head">
       <h2>The board</h2>
       <div class="spacer"></div>
+      ${raw(liveBadge(picks))}
     </div>
     ${raw(
       picks.length
@@ -1006,6 +1061,26 @@ function viewPick() {
 
   const mine = myPick();
 
+  // The pick is in. Opening the board again is a decision, not a default —
+  // by now the group may already have the ticket placed off these picks.
+  if (mine && !S.changingPick) {
+    const locks = w.lock_at ? timeUntil(w.lock_at) : null;
+    return html`<div class="card pick-in">
+      <div class="empty">
+        <div class="big" aria-hidden="true">✅</div>
+        <h2>Your pick is in</h2>
+        <p class="pick-in-bet"><b>${describePick(mine)}</b> <span class="mono">${oddsStr(mine.price)}</span></p>
+        <p class="tiny muted">${raw(
+          w.lock_at
+            ? `Picks lock ${esc(fmtKickoff(w.lock_at))}${locks ? ` · in ${esc(locks)}` : ''}.`
+            : 'Picks lock when the commissioner says.'
+        )}</p>
+        <button class="btn" id="changePick">Change my pick</button>
+        <p class="tiny faint">Check with the group first that the ticket hasn't been placed.</p>
+      </div>
+    </div>`;
+  }
+
   return html`
     ${raw(
       mine
@@ -1016,6 +1091,7 @@ function viewPick() {
                 <b class="tiny">Replacing your current pick</b>
                 <div class="tiny muted">${describePick(mine)} (${oddsStr(mine.price)})</div>
               </div>
+              <button class="btn sm ghost" id="keepPick">Keep it</button>
             </div>
           </div>`
         : ''
@@ -2201,6 +2277,17 @@ function wirePick() {
 
   wireShortlist();
 
+  $('#changePick')?.addEventListener('click', () => {
+    if (!confirm("Change your pick?\n\nCheck with the group first: if the ticket has already been placed with this pick on it, it's too late to swap.")) return;
+    S.changingPick = true;
+    render();
+  });
+  $('#keepPick')?.addEventListener('click', () => {
+    S.changingPick = false;
+    S.selectedProp = null;
+    render();
+  });
+
   // Typed line: snap to the nearest rung, ties upward, and say what you got.
   $('#retryCurve')?.addEventListener('click', () => loadCurve());
   // Just opened: bring it up under the row so the whole slip is on screen,
@@ -2902,7 +2989,7 @@ function viewAdmin() {
               <div class="spacer" style="margin-left:auto"></div>
               ${raw(
                 w.status === 'open'
-                  ? '<button class="btn sm" data-status="locked">Lock picks</button>'
+                  ? '<button class="btn sm" data-status="locked">Lock now</button>'
                   : w.status === 'locked'
                   ? '<span class="tiny faint">Enter stat lines below to open voting</span>'
                   : w.status === 'graded'
@@ -2910,6 +2997,7 @@ function viewAdmin() {
                   : '<button class="btn sm ghost" data-status="graded">Reopen voting</button>'
               )}
             </div>
+            ${raw(clockLine())}
             <div class="grid three">
               <label class="field"><span>Stake ($)</span>
                 <input id="wStake" type="number" step="1" min="0" value="${raw((w.stake_cents / 100).toFixed(2))}"></label>
@@ -3623,6 +3711,7 @@ function wireAdmin() {
       try {
         const res = await api(`/api/weeks/${S.week.week.id}/grade`, { method: 'POST', body: { results } });
         S.week = res;
+        S.changingPick = false;
         (res.warnings || []).forEach((w) => toast('⚠️ ' + w, 'err', 9000));
         const pending = res.picks.filter((p) => p.result === 'pending').length;
         // Say what actually happened, not what we hoped would.

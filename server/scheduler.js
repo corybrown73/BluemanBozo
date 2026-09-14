@@ -20,6 +20,8 @@ const { db, getSetting, activeSeason, currentWeek, pickWeek } = require('./db');
 const game = require('./game');
 const digest = require('./digest');
 const odds = require('./odds');
+const calendar = require('./calendar');
+const boxscore = require('./boxscore');
 
 const JOBS = [
   { key: 'open',  setting: 'cron_open',  label: 'Saturday — get your bets in',  audience: 'group' },
@@ -70,33 +72,204 @@ function alreadyRanForWeek(jobKey, weekId) {
 /* ---------------- the work ---------------- */
 
 /** Tuesday may need to create the week before it can announce it. */
-function ensureWeekForOpen() {
+function ensureWeekForOpen(now = new Date()) {
   // The week people pick in, not the one still being graded — those can be
   // different weeks on a Tuesday, and the summons must go out for the right one.
   const week = pickWeek();
   if (week) return week;
   if (getSetting('auto_open_week') !== '1') return null;
+  return createWeek(calendar.nflWeekFor(now) || nextWeekNumber(), now);
+}
 
+function nextWeekNumber() {
   const season = activeSeason();
-  const next = db
-    .prepare('SELECT COALESCE(MAX(week_number), 0) + 1 AS n FROM weeks WHERE season_id = ?')
-    .get(season.id).n;
+  return db.prepare('SELECT COALESCE(MAX(week_number), 0) + 1 AS n FROM weeks WHERE season_id = ?').get(season.id).n;
+}
+
+/** Open a week: last week's bozo pays, and the clock supplies its lock time. */
+function createWeek(weekNumber, now = new Date()) {
+  const season = activeSeason();
+  if (!season) return null;
+  if (db.prepare('SELECT 1 FROM weeks WHERE season_id = ? AND week_number = ?').get(season.id, weekNumber)) return null;
   const prevBozo = db
     .prepare(
       `SELECT b.user_id FROM bozos b JOIN weeks w ON w.id = b.week_id
-       WHERE w.season_id = ? ORDER BY w.week_number DESC LIMIT 1`
+       WHERE w.season_id = ? AND w.week_number < ? ORDER BY w.week_number DESC LIMIT 1`
     )
-    .get(season.id);
+    .get(season.id, weekNumber);
   const stake = parseInt(getSetting('default_stake_cents'), 10) || 2000;
-
+  let lockAt = null;
+  if (getSetting('auto_lock') === '1') {
+    const at = calendar.lockAtFor(weekNumber, season.year, getSetting('lock_time_et') || '12:55');
+    if (at.getTime() > now.getTime()) lockAt = at.toISOString();
+  }
   const id = db
     .prepare(
-      `INSERT INTO weeks (season_id, week_number, status, stake_cents, payer_user_id)
-       VALUES (?, ?, 'open', ?, ?)`
+      `INSERT INTO weeks (season_id, week_number, status, stake_cents, payer_user_id, lock_at)
+       VALUES (?, ?, 'open', ?, ?, ?)`
     )
-    .run(season.id, next, stake, prevBozo?.user_id || null).lastInsertRowid;
-
+    .run(season.id, weekNumber, stake, prevBozo?.user_id || null, lockAt).lastInsertRowid;
   return game.getWeek(id);
+}
+
+/* ---------------- the clock ---------------- */
+
+/**
+ * The commissioner is not the clock. Once a minute:
+ *
+ *   - an open week whose lock time has passed is locked
+ *   - an open week with no lock time gets Sunday 12:55 ET
+ *   - on Tuesday morning the coming Sunday's week opens, numbered off the
+ *     NFL calendar, whether or not last week has been settled (it waits its
+ *     turn on screen)
+ *   - while games are on, every few minutes the box scores come in and each
+ *     pick shows where it stands; once every game is final the week grades
+ *     itself and voting opens. A player missing from a final box score is
+ *     left for a human — that is a void decision, not a zero.
+ *
+ * Everything here can still be done by hand, and each part can be switched
+ * off in settings. `now` is a parameter so the tests can set the clock.
+ */
+let clockTimer = null;
+let lastLiveAt = 0;
+
+function lockDueWeeks(now) {
+  if (getSetting('auto_lock') !== '1') return 0;
+  return db
+    .prepare(`UPDATE weeks SET status = 'locked' WHERE status = 'open' AND lock_at IS NOT NULL AND lock_at <= ?`)
+    .run(now.toISOString()).changes;
+}
+
+function setDefaultLocks(now) {
+  if (getSetting('auto_lock') !== '1') return 0;
+  const season = activeSeason();
+  if (!season) return 0;
+  const time = getSetting('lock_time_et') || '12:55';
+  let n = 0;
+  for (const w of db.prepare(`SELECT * FROM weeks WHERE season_id = ? AND status = 'open' AND lock_at IS NULL`).all(season.id)) {
+    let at = calendar.lockAtFor(w.week_number, season.year, time);
+    if (at.getTime() <= now.getTime()) {
+      // Numbered for a Sunday already gone: lock on the next Sunday instead of on arrival.
+      const s = calendar.sundayOf(now);
+      at = calendar.etToUtc(s.y, s.m, s.d, ...time.split(':').map((x) => parseInt(x, 10)));
+      if (at.getTime() <= now.getTime()) at = new Date(at.getTime() + 7 * 86400000);
+    }
+    db.prepare('UPDATE weeks SET lock_at = ? WHERE id = ?').run(at.toISOString(), w.id);
+    n += 1;
+  }
+  return n;
+}
+
+function openDueWeek(now) {
+  if (getSetting('auto_open_week') !== '1') return null;
+  const season = activeSeason();
+  if (!season) return null;
+  if (pickWeek()) return null; // something is already open for picks
+  const target = calendar.nflWeekFor(now);
+  if (!target) return null;
+  if (db.prepare('SELECT 1 FROM weeks WHERE season_id = ? AND week_number = ?').get(season.id, target)) return null;
+  const hour = parseInt(getSetting('auto_open_hour_et'), 10);
+  if (now.getTime() < calendar.openAtFor(target, season.year, Number.isFinite(hour) ? hour : 6).getTime()) return null;
+  // Its Sunday already kicked off (a Monday night, say): nothing left to pick.
+  if (calendar.lockAtFor(target, season.year, getSetting('lock_time_et') || '12:55').getTime() <= now.getTime()) return null;
+  return createWeek(target, now);
+}
+
+/** Picks whose game is on, or just was: fifteen minutes before kickoff to four and a half hours after. */
+function gamesLive(picks, now) {
+  const t = now.getTime();
+  return picks.some((p) => {
+    const k = Date.parse(p.commence_time);
+    return Number.isFinite(k) && t >= k - 15 * 60000 && t <= k + 4.5 * 3600000;
+  });
+}
+
+async function liveTick(now, { fetchStats = boxscore.statsForPicks, force = false } = {}) {
+  if (getSetting('live_stats') !== '1') return { skipped: 'off' };
+  const season = activeSeason();
+  if (!season) return { skipped: 'no season' };
+  const week = db
+    .prepare(
+      `SELECT w.* FROM weeks w WHERE w.season_id = ? AND w.status = 'locked'
+         AND EXISTS (SELECT 1 FROM picks p WHERE p.week_id = w.id)
+       ORDER BY w.week_number DESC LIMIT 1`
+    )
+    .get(season.id);
+  if (!week) return { skipped: 'nothing locked' };
+
+  const picks = game.rawPicks(week.id);
+  if (!force && !gamesLive(picks, now)) return { skipped: 'no games on' };
+  const interval = (parseInt(getSetting('live_interval_minutes'), 10) || 15) * 60000;
+  if (!force && now.getTime() - lastLiveAt < interval) return { skipped: 'too soon' };
+  lastLiveAt = now.getTime();
+
+  const stats = await fetchStats(picks, { force: true });
+  if (stats.error) return { week_id: week.id, error: stats.error };
+  game.applyLive(week.id, stats);
+
+  // Final results settle themselves. The week flips to voting only once every
+  // pick is settled, so a DNP still waits for the commissioner's decision.
+  const finals = stats.results.filter((r) => r.final).map((r) => ({ pick_id: r.pick_id, actual_value: r.actual_value }));
+  let graded = null;
+  if (finals.length) graded = game.gradePicks(week, finals);
+  return {
+    week_id: week.id,
+    live: stats.results.filter((r) => !r.final).length,
+    settled: finals.length,
+    unresolved: stats.unresolved.length,
+    status: graded ? graded.status : week.status,
+  };
+}
+
+async function clockTick(now = new Date(), deps = {}) {
+  const out = { locks_set: setDefaultLocks(now), locked: lockDueWeeks(now), opened: null, live: null };
+  const opened = openDueWeek(now);
+  if (opened) out.opened = opened.week_number;
+  try {
+    out.live = await liveTick(now, deps);
+  } catch (err) {
+    out.live = { error: err.message };
+  }
+  return out;
+}
+
+function startClock() {
+  if (clockTimer) clearInterval(clockTimer);
+  const run = () =>
+    clockTick().then((r) => {
+      if (r.locked) console.log(`[clock] locked ${r.locked} week(s)`);
+      if (r.opened) console.log(`[clock] opened week ${r.opened}`);
+      if (r.live && !r.live.skipped) console.log(`[clock] live: ${JSON.stringify(r.live)}`);
+    }).catch((err) => console.error('[clock] tick failed:', err.message));
+  setTimeout(run, 5000).unref?.();
+  clockTimer = setInterval(run, 60 * 1000);
+  if (clockTimer.unref) clockTimer.unref();
+}
+
+/** What the clock will do next — for the screens. */
+function clockStatus(now = new Date()) {
+  const season = activeSeason();
+  const open = pickWeek();
+  const target = calendar.nflWeekFor(now);
+  const nextNumber = open ? open.week_number + 1 : target;
+  const hour = parseInt(getSetting('auto_open_hour_et'), 10);
+  const liveWeek = season
+    ? db.prepare(`SELECT MAX(p.live_at) AS at FROM picks p JOIN weeks w ON w.id = p.week_id WHERE w.season_id = ? AND w.status = 'locked'`).get(season.id)
+    : null;
+  return {
+    auto_lock: getSetting('auto_lock') === '1',
+    lock_time_et: getSetting('lock_time_et') || '12:55',
+    auto_open: getSetting('auto_open_week') === '1',
+    live_stats: getSetting('live_stats') === '1',
+    live_interval_minutes: parseInt(getSetting('live_interval_minutes'), 10) || 15,
+    nfl_week: target,
+    next_lock_at: open ? open.lock_at : null,
+    next_open_at: season && nextNumber && getSetting('auto_open_week') === '1'
+      ? calendar.openAtFor(nextNumber, season.year, Number.isFinite(hour) ? hour : 6).toISOString()
+      : null,
+    next_open_week: nextNumber,
+    live_last_at: liveWeek?.at || null,
+  };
 }
 
 /**
@@ -290,6 +463,7 @@ function tzOffsetMinutes(timeZone, at) {
 /* ---------------- lifecycle ---------------- */
 
 function stop() {
+  if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
   for (const t of tasks) t.stop();
   tasks = [];
   if (sweeper) {
@@ -301,6 +475,8 @@ function stop() {
 /** (Re)build every cron task from current settings. Safe to call repeatedly. */
 function start() {
   stop();
+  // The clock runs whether or not the digests are switched on.
+  startClock();
   if (getSetting('schedule_enabled') !== '1') {
     return { enabled: false, jobs: [] };
   }
@@ -375,4 +551,8 @@ function status() {
   };
 }
 
-module.exports = { start, stop, status, runJob, catchUp, lastScheduledTime, parseDays, JOBS };
+module.exports = {
+  clockTick,
+  clockStatus,
+  createWeek,
+  liveTick, start, stop, status, runJob, catchUp, lastScheduledTime, parseDays, JOBS };

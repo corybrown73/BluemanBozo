@@ -212,6 +212,21 @@ CREATE INDEX IF NOT EXISTS idx_api_usage_month ON api_usage(month);
 
 /* ---------- settings helpers ---------- */
 
+/**
+ * Columns added after the first release. CREATE TABLE IF NOT EXISTS does not
+ * touch a table that already exists, so anything new has to be added to a
+ * live database by hand — idempotently, so every boot can run it.
+ */
+function ensureColumn(table, column, ddl) {
+  const have = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+  if (!have) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+}
+// Where a pick stands while its game is on: filled every few minutes from the
+// box score, never graded from — grading is a separate, deliberate step.
+ensureColumn('picks', 'live_value', 'REAL');
+ensureColumn('picks', 'live_note', 'TEXT');
+ensureColumn('picks', 'live_at', 'TEXT');
+
 const DEFAULT_SETTINGS = {
   group_name: 'Blue Man Group',
   picks_per_user: '1',
@@ -257,6 +272,13 @@ const DEFAULT_SETTINGS = {
 
   // Weekly rhythm. Times are in schedule_timezone, cron format: min hour * * dow
   // (0=Sun ... 2=Tue, 4=Thu, 6=Sat).
+  // The clock: the app locks, opens and updates on its own. Each can be
+  // switched off, and every one of them can still be done by hand.
+  auto_lock: '1',
+  lock_time_et: '12:55',        // Sunday, Eastern — the early window's kickoff minus five
+  auto_open_hour_et: '6',       // Tuesday morning, Eastern
+  live_stats: '1',
+  live_interval_minutes: '15',
   schedule_enabled: '0',
   schedule_timezone: 'America/New_York',
   cron_open:  '0 12 * * 6',   // Saturday noon - get your bets in, board is live

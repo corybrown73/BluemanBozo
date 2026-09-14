@@ -256,10 +256,25 @@ async function statsForPicks(picks, { force = false } = {}) {
       unresolved.push({ pick_id: pick.id, player: pick.player, reason: 'That game is not on ESPN\'s board.' });
       continue;
     }
-    if (!event.status?.type?.completed) {
-      unresolved.push({ pick_id: pick.id, player: pick.player, reason: 'That game has not finished.' });
+
+    // Where the game stands. A game in progress still has a box score, and
+    // "Kelce has 4 catches, third quarter" is worth more during the game than
+    // "not finished" — so it is read and flagged live, never treated as final.
+    const st = event.status || {};
+    const type = st.type || {};
+    const state = type.state || (type.completed ? 'post' : 'pre');
+    if (state === 'pre') {
+      unresolved.push({ pick_id: pick.id, player: pick.player, reason: 'That game has not kicked off.', not_started: true });
       continue;
     }
+    const final = Boolean(type.completed) || state === 'post';
+    const clock = {
+      final,
+      live: !final,
+      period: st.period ?? null,
+      clock: st.displayClock ?? null,
+      detail: type.shortDetail || type.detail || (final ? 'Final' : 'In progress'),
+    };
 
     if (!summaries.has(event.id)) {
       try {
@@ -273,18 +288,22 @@ async function statsForPicks(picks, { force = false } = {}) {
     const entry = players.get(normalizeName(pick.player));
 
     if (!entry) {
-      // Nowhere in the box score. Usually inactive or hurt — and a sportsbook
-      // would void that, not settle it at zero. Say so instead of deciding.
+      // Nowhere in the box score. After the final whistle that usually means
+      // inactive or hurt — and a sportsbook would void that, not settle it at
+      // zero. Say so instead of deciding. Mid-game it just means no touches yet.
       unresolved.push({
         pick_id: pick.id,
         player: pick.player,
-        reason: 'Did not appear in the box score — inactive, or the name did not match.',
+        reason: final
+          ? 'Did not appear in the box score — inactive, or the name did not match.'
+          : 'No stats yet.',
+        ...clock,
       });
       continue;
     }
 
     if (UNGRADEABLE[pick.market]) {
-      unresolved.push({ pick_id: pick.id, player: pick.player, reason: UNGRADEABLE[pick.market] });
+      unresolved.push({ pick_id: pick.id, player: pick.player, reason: UNGRADEABLE[pick.market], ...clock });
       continue;
     }
 
@@ -294,6 +313,7 @@ async function statsForPicks(picks, { force = false } = {}) {
         pick_id: pick.id,
         player: pick.player,
         reason: `${entry.name} played, but the feed has no ${pick.market_label} for them.`,
+        ...clock,
       });
       continue;
     }
@@ -306,6 +326,7 @@ async function statsForPicks(picks, { force = false } = {}) {
       market_label: pick.market_label,
       actual_value: value,
       source: 'espn',
+      ...clock,
     });
   }
 
