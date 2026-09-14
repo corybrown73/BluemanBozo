@@ -172,3 +172,36 @@ test('every part of the clock can be switched off', async () => {
   setSetting('live_stats', '1');
   db.prepare('DELETE FROM weeks WHERE week_number = 9').run();
 });
+
+test('a week opened before its Sunday with no lock time locks the moment the clock sees the Sunday has passed', async () => {
+  // The live app's week 1: opened Saturday the 12th, before auto-lock existed.
+  const season = db.prepare('SELECT id FROM seasons').get();
+  db.prepare(`INSERT INTO weeks (season_id, week_number, status, stake_cents, created_at) VALUES (?, 1, 'open', 2000, '2026-09-12 18:16:58')`).run(season.id);
+  const r = await scheduler.clockTick(at('2026-09-14T14:00:00Z')); // Monday Sep 14
+  assert.ok(r.locks_set >= 1);
+  const w = weekRow(1);
+  assert.strictEqual(w.status, 'locked', 'the games were yesterday — nobody edits a pick now');
+  assert.strictEqual(w.lock_at, '2026-09-13T16:55:00.000Z');
+});
+
+test('games that finished before anyone was looking still get one stats pass', async () => {
+  const w = weekRow(1);
+  db.prepare(
+    `INSERT INTO picks (week_id, user_id, player, market, market_label, selection, line, price, commence_time, home_team, away_team)
+     VALUES (?, ?, 'Late Look', 'player_rush_yds', 'Rushing Yards', 'Over', 40.5, -110, '2026-09-13T17:00:00Z', 'Dallas Cowboys', 'Philadelphia Eagles')`
+  ).run(w.id, ids.a);
+  let calls = 0;
+  const fetchStats = async (picks) => {
+    calls += 1;
+    return { results: picks.map((p) => ({ pick_id: p.id, actual_value: 88, final: true, detail: 'Final' })), unresolved: [] };
+  };
+  // Monday afternoon: the game window closed hours ago, but the pick has never been checked.
+  const r = await scheduler.clockTick(at('2026-09-14T18:00:00Z'), { fetchStats });
+  assert.strictEqual(calls, 1, 'one catch-up pass');
+  assert.strictEqual(r.live.settled, 1);
+  assert.strictEqual(game.rawPicks(w.id)[0].result, 'win');
+  const again = await scheduler.clockTick(at('2026-09-14T18:05:00Z'), { fetchStats });
+  assert.strictEqual(calls, 1, 'and then it is quiet');
+  assert.ok(again.live.skipped, 'nothing owed any more');
+  db.prepare('DELETE FROM weeks WHERE week_number = 1').run();
+});

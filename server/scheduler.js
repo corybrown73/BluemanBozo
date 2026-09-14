@@ -149,7 +149,16 @@ function setDefaultLocks(now) {
   for (const w of db.prepare(`SELECT * FROM weeks WHERE season_id = ? AND status = 'open' AND lock_at IS NULL`).all(season.id)) {
     let at = calendar.lockAtFor(w.week_number, season.year, time);
     if (at.getTime() <= now.getTime()) {
-      // Numbered for a Sunday already gone: lock on the next Sunday instead of on arrival.
+      const created = Date.parse(String(w.created_at).replace(' ', 'T') + 'Z');
+      if (Number.isFinite(created) && created < at.getTime()) {
+        // Opened before its Sunday, never given a lock time, and the games
+        // have since been played: it locks now. Nobody edits a pick after
+        // kickoff because a setting did not exist yet.
+        db.prepare(`UPDATE weeks SET lock_at = ?, status = 'locked' WHERE id = ? AND status = 'open'`).run(at.toISOString(), w.id);
+        n += 1;
+        continue;
+      }
+      // Opened after its own Sunday: a stand-in for the coming one, so lock then.
       const s = calendar.sundayOf(now);
       at = calendar.etToUtc(s.y, s.m, s.d, ...time.split(':').map((x) => parseInt(x, 10)));
       if (at.getTime() <= now.getTime()) at = new Date(at.getTime() + 7 * 86400000);
@@ -184,6 +193,19 @@ function gamesLive(picks, now) {
   });
 }
 
+/**
+ * Games that finished while nobody was looking — a deploy or a restart after
+ * Sunday — still deserve one pass, so a pick whose kickoff is within the last
+ * day and a half and that has never been checked gets it.
+ */
+function owedAPass(picks, now) {
+  const t = now.getTime();
+  return picks.some((p) => {
+    const k = Date.parse(p.commence_time);
+    return Number.isFinite(k) && !p.live_at && p.result === 'pending' && k < t && t - k <= 36 * 3600000;
+  });
+}
+
 async function liveTick(now, { fetchStats = boxscore.statsForPicks, force = false } = {}) {
   if (getSetting('live_stats') !== '1') return { skipped: 'off' };
   const season = activeSeason();
@@ -198,9 +220,10 @@ async function liveTick(now, { fetchStats = boxscore.statsForPicks, force = fals
   if (!week) return { skipped: 'nothing locked' };
 
   const picks = game.rawPicks(week.id);
-  if (!force && !gamesLive(picks, now)) return { skipped: 'no games on' };
+  const catchUpPass = owedAPass(picks, now);
+  if (!force && !catchUpPass && !gamesLive(picks, now)) return { skipped: 'no games on' };
   const interval = (parseInt(getSetting('live_interval_minutes'), 10) || 15) * 60000;
-  if (!force && now.getTime() - lastLiveAt < interval) return { skipped: 'too soon' };
+  if (!force && !catchUpPass && now.getTime() - lastLiveAt < interval) return { skipped: 'too soon' };
   lastLiveAt = now.getTime();
 
   const stats = await fetchStats(picks, { force: true });
