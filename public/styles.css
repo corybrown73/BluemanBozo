@@ -769,3 +769,16 @@ button.board-section-head .spacer { flex: 1; }
 .live-meter.good i { background: var(--green); }
 .badge.live { display: inline-flex; align-items: center; gap: 6px; }
 .clock-line { margin: -4px 0 12px; }
+
+/* Where each bet stands, at a glance. A bozo row keeps its own colour. */
+.pickrow.st-hit:not(.is-bozo)  { border-color: var(--green); background: var(--green-tint); }
+.pickrow.st-miss:not(.is-bozo) { border-color: var(--red);   background: var(--red-tint); }
+.pickrow.st-live:not(.is-bozo) { border-color: var(--orange); }
+.pickrow.st-push:not(.is-bozo) { border-color: var(--border-strong); }
+.status-strip.dead { border-color: var(--red); }
+.chip.hit    { background: var(--green-tint); border-color: transparent; }
+.chip.hit    .chip-state { color: var(--green); }
+.chip.miss   { background: var(--red-tint);   border-color: transparent; }
+.chip.miss   .chip-state { color: var(--red); }
+.chip.inplay { background: var(--orange-tint); border-color: transparent; }
+.chip.inplay .chip-state { color: var(--orange); }

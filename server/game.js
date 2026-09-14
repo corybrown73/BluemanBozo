@@ -61,6 +61,7 @@ function decoratePick(pick) {
     market_order: meta.order,
     price_display: scoring.formatAmerican(pick.price),
     decimal_odds: Number(scoring.americanToDecimal(pick.price).toFixed(4)),
+    live_status: scoring.liveStatus(pick),
     ...breakdown,
   };
 }
@@ -231,6 +232,7 @@ function weekDetail(weekId, viewer) {
         picked_at: mine ? mine.created_at : null,
         // Same masking the pick itself gets: hidden picks read as pending.
         result: shown ? shown.result : null,
+        live_status: shown && !shown.hidden ? shown.live_status : null,
         // How many they are still weighing. The number is public, what is on
         // the list is not — that stays with whoever put it there.
         weighing: weighing.get(u.id) || 0,

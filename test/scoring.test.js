@@ -556,3 +556,33 @@ test('counting markets keep their own step', () => {
   const tds = alt.curveFor({ market: 'player_pass_tds', line: 1.5, selection: 'Over', price: -130, opposite_price: 105 });
   assert.strictEqual(tds.step, 0.5);
 });
+
+test('a bet goes green the moment it cannot lose, red the moment it cannot win', () => {
+  const over = (live) => s.liveStatus({ selection: 'Over', line: 58.5, live_value: live, result: 'pending' });
+  assert.strictEqual(over(41), 'live', 'short of the line, still in play');
+  assert.strictEqual(over(58.5), 'live', 'on the line is not over it');
+  assert.strictEqual(over(59), 'hit', 'past the line, it cannot come back');
+
+  const under = (live) => s.liveStatus({ selection: 'Under', line: 58.5, live_value: live, result: 'pending' });
+  assert.strictEqual(under(41), 'live', 'an under is never safe until the whistle');
+  assert.strictEqual(under(59), 'miss', 'but it is dead the moment the line is passed');
+
+  assert.strictEqual(s.liveStatus({ selection: 'Yes', line: null, live_value: 1, result: 'pending' }), 'hit');
+  assert.strictEqual(s.liveStatus({ selection: 'Yes', line: null, live_value: 0, result: 'pending' }), 'live');
+  assert.strictEqual(s.liveStatus({ selection: 'No', line: null, live_value: 1, result: 'pending' }), 'miss');
+
+  assert.strictEqual(s.liveStatus({ selection: 'Over', line: 58.5, live_value: null, result: 'pending' }), null, 'no box score, no opinion');
+  assert.strictEqual(s.liveStatus({ selection: 'Over', line: 58.5, live_value: 12, result: 'loss' }), 'miss', 'a graded pick answers from its result');
+  assert.strictEqual(s.liveStatus({ selection: 'Over', line: 58.5, live_value: 90, result: 'win' }), 'hit');
+  assert.strictEqual(s.liveStatus({ selection: 'Over', line: 58, live_value: 58, result: 'push' }), 'push');
+  assert.strictEqual(s.liveStatus({ selection: 'Over', line: 58.5, live_value: null, result: 'void' }), 'void');
+
+  // And the ticket follows: one dead leg is a dead ticket, mid-game or not.
+  const legs = [
+    { selection: 'Over', line: 58.5, live_value: 71, price: -110, result: 'pending' },
+    { selection: 'Under', line: 80.5, live_value: 95, price: -115, result: 'pending' },
+  ];
+  assert.strictEqual(s.parlay(legs).status, 'dead');
+  assert.strictEqual(s.parlay([legs[0]]).status, 'cashed', 'every leg past its line is a cashed ticket');
+  assert.strictEqual(s.parlay([legs[0], { ...legs[0], live_value: 12 }]).status, 'live');
+});

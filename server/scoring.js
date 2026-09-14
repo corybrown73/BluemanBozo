@@ -59,8 +59,10 @@ function formatAmerican(american) {
 function parlay(picks, stakeCents = 2000) {
   const legs = picks.filter((p) => p.result !== 'push' && p.result !== 'void');
   const decimal = legs.reduce((acc, p) => acc * americanToDecimal(p.price), 1);
-  const anyLoss = legs.some((p) => p.result === 'loss');
-  const allWin = legs.length > 0 && legs.every((p) => p.result === 'win');
+  // A leg that is dead mid-game kills the ticket now, not at the final
+  // whistle; one that has already cleared its line counts as won.
+  const anyLoss = legs.some((p) => liveStatus(p) === 'miss');
+  const allWin = legs.length > 0 && legs.every((p) => liveStatus(p) === 'hit');
   const stake = Number(stakeCents) || 0;
   const payoutCents = Math.round(stake * decimal);
 
@@ -210,7 +212,39 @@ function resolveBozo(votes, picks) {
   return null;
 }
 
+/**
+ * Where a bet stands right now, for colouring a row: 'hit' | 'miss' | 'push'
+ * | 'void' | 'live' | null.
+ *
+ * Graded picks answer from their result. A pick still in play answers from
+ * the box score — and only when the answer cannot change: an Over that has
+ * already cleared its line has hit whatever happens next, an Under that has
+ * already gone past its line is dead, a touchdown scored is scored. Anything
+ * else is still live. No box score yet means no opinion.
+ */
+function liveStatus(pick) {
+  const r = String(pick.result || 'pending');
+  if (r === 'win') return 'hit';
+  if (r === 'loss') return 'miss';
+  if (r === 'push') return 'push';
+  if (r === 'void') return 'void';
+
+  const value = toNum(pick.live_value);
+  if (!Number.isFinite(value)) return null;
+  const side = String(pick.selection || '').trim().toLowerCase();
+
+  if (side === 'yes') return value >= 1 ? 'hit' : 'live';
+  if (side === 'no') return value >= 1 ? 'miss' : 'live';
+
+  const line = toNum(pick.line);
+  if (!Number.isFinite(line)) return null;
+  if (side === 'over') return value > line ? 'hit' : 'live';
+  if (side === 'under') return value > line ? 'miss' : 'live';
+  return null;
+}
+
 module.exports = {
+  liveStatus,
   toNum,
   americanToDecimal,
   decimalToAmerican,

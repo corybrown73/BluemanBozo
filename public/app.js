@@ -457,7 +457,9 @@ function pickRow(p, opts = {}) {
       <div class="num"><span class="badge">In</span></div>
     </div>`;
   }
-  return html`<div class="pickrow ${isMe ? 'mine' : ''} ${isBozo ? 'is-bozo' : ''}">
+  // Green once it has hit, red once it is dead, whatever the game clock says.
+  const st = p.live_status;
+  return html`<div class="pickrow ${isMe ? 'mine' : ''} ${isBozo ? 'is-bozo' : ''} ${st ? 'st-' + st : ''}">
     <span class="av" aria-hidden="true">${p.avatar}</span>
     <div class="who">
       <b>${p.display_name}${raw(isMe ? ' <span class="badge blue">You</span>' : '')}${raw(
@@ -473,6 +475,10 @@ function pickRow(p, opts = {}) {
       <div class="tiny faint">${raw(
         p.actual_value !== null && p.actual_value !== undefined
           ? `${RESULT_ICON[p.result] || ''} actual ${esc(p.actual_value)}`
+          : p.result === 'pending' && st === 'hit'
+          ? '<b class="text-up">✅ hit</b>'
+          : p.result === 'pending' && st === 'miss'
+          ? '<b class="text-down">❌ dead</b>'
           : RESULT_ICON[p.result] || ''
       )}</div>
     </div>
@@ -595,7 +601,18 @@ function statusStrip() {
 
   let headline;
   let tone;
-  if (w.status === 'locked') {
+  // Once the games are on, the roster carries each bet's standing and the
+  // headline turns into the tally everyone actually wants: hit, dead, live.
+  const hit = roster.filter((r) => r.live_status === 'hit').length;
+  const dead = roster.filter((r) => r.live_status === 'miss').length;
+  const settled = roster.filter((r) => r.live_status && r.live_status !== 'live').length;
+  if (w.status === 'locked' && (hit || dead)) {
+    const stillLive = Math.max(0, inCount - settled);
+    headline = [hit ? `${hit} hit` : '', dead ? `${dead} dead` : '', stillLive ? `${stillLive} live` : '']
+      .filter(Boolean)
+      .join(' · ');
+    tone = dead ? 'dead' : 'done';
+  } else if (w.status === 'locked') {
     headline = `Locked — ${inCount} of ${roster.length} in`;
     tone = 'locked';
   } else if (!waiting.length) {
@@ -640,8 +657,16 @@ function statusStrip() {
       ${raw(
         roster
           .map(
-            (r) => html`<div class="chip ${r.picked ? 'in' : 'out'} ${r.id === S.user.id ? 'me' : ''}" title="${raw(
-              r.picked
+            (r) => html`<div class="chip ${r.picked ? 'in' : 'out'} ${r.id === S.user.id ? 'me' : ''} ${
+              r.live_status === 'hit' ? 'hit' : r.live_status === 'miss' ? 'miss' : r.live_status === 'live' ? 'inplay' : ''
+            }" title="${raw(
+              r.live_status === 'hit'
+                ? 'Hit'
+                : r.live_status === 'miss'
+                ? 'Dead'
+                : r.live_status === 'live'
+                ? 'Still in play'
+                : r.picked
                 ? 'Picked'
                 : r.weighing
                 ? `Weighing ${esc(r.weighing)} — still deciding`
@@ -656,7 +681,9 @@ function statusStrip() {
                   ? html`<span class="chip-weighing" aria-label="weighing ${r.weighing}">★${r.weighing}</span>`
                   : ''
               )}
-              <span class="chip-state">${raw(r.picked ? '✓' : '…')}</span>
+              <span class="chip-state">${raw(
+                r.live_status === 'hit' ? '✓' : r.live_status === 'miss' ? '✗' : r.live_status === 'live' ? '●' : r.picked ? '✓' : '…'
+              )}</span>
             </div>`
           )
           .join('')
