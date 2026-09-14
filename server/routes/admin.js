@@ -132,6 +132,8 @@ const EDITABLE_SETTINGS = new Set([
   'monthly_credit_cap',
   'site_url',
   'odds_api_key',
+  'clock_enabled',
+  'lock_time_et',
 ]);
 
 router.get('/settings', (req, res) => {
@@ -154,6 +156,20 @@ router.patch('/settings', (req, res) => {
   const changed = [];
   for (const [key, value] of Object.entries(req.body || {})) {
     if (!EDITABLE_SETTINGS.has(key)) continue;
+    if (key === 'lock_time_et') {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
+      if (!m || +m[1] > 23 || +m[2] > 59) {
+        return res.status(400).json({ error: `"${value}" is not a time. Use HH:MM, Eastern — 12:55 for the early kickoff.` });
+      }
+      setSetting(key, `${String(+m[1]).padStart(2, '0')}:${m[2]}`);
+      changed.push(key);
+      continue;
+    }
+    if (key === 'clock_enabled') {
+      setSetting(key, value === '0' || value === false || value === 0 ? '0' : '1');
+      changed.push(key);
+      continue;
+    }
     setSetting(key, value);
     changed.push(key);
   }

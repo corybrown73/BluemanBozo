@@ -536,3 +536,15 @@ test('the board offers this week\'s Sunday and Monday games only', () => {
   setSetting('slate_days', 'week');
   assert.deepStrictEqual(odds.withinSlate([], saturday), [], 'invents nothing');
 });
+
+
+test('the lock time has to be a time', async () => {
+  const bad = await call('PATCH', '/api/admin/settings', { lock_time_et: '25:99' });
+  assert.strictEqual(bad.status, 400);
+  assert.match(bad.data.error, /HH:MM/);
+  const ok = await call('PATCH', '/api/admin/settings', { lock_time_et: '1:05', clock_enabled: '0' });
+  assert.strictEqual(ok.status, 200);
+  assert.strictEqual(ok.data.settings.lock_time_et, '01:05', 'normalised');
+  assert.strictEqual(ok.data.settings.clock_enabled, '0');
+  await call('PATCH', '/api/admin/settings', { lock_time_et: '12:55', clock_enabled: '1' });
+});

@@ -245,6 +245,8 @@ async function liveTick(now, { fetchStats = boxscore.statsForPicks, force = fals
 }
 
 async function clockTick(now = new Date(), deps = {}) {
+  // The one switch: paused, and the commissioner is the clock again.
+  if (getSetting('clock_enabled') === '0') return { paused: true, locks_set: 0, locked: 0, opened: null, live: { skipped: 'paused' } };
   const out = { locks_set: setDefaultLocks(now), locked: lockDueWeeks(now), opened: null, live: null };
   const opened = openDueWeek(now);
   if (opened) out.opened = opened.week_number;
@@ -274,12 +276,20 @@ function clockStatus(now = new Date()) {
   const season = activeSeason();
   const open = pickWeek();
   const target = calendar.nflWeekFor(now);
-  const nextNumber = open ? open.week_number + 1 : target;
   const hour = parseInt(getSetting('auto_open_hour_et'), 10);
+  const openHour = Number.isFinite(hour) ? hour : 6;
+  // The next opening is always ahead of us: after the open week's, or the
+  // first calendar week whose Tuesday has not come yet.
+  let nextNumber = open ? open.week_number + 1 : target;
+  while (season && nextNumber && nextNumber <= 22 && calendar.openAtFor(nextNumber, season.year, openHour).getTime() <= now.getTime()) {
+    nextNumber += 1;
+  }
+  if (nextNumber > 22) nextNumber = null;
   const liveWeek = season
     ? db.prepare(`SELECT MAX(p.live_at) AS at FROM picks p JOIN weeks w ON w.id = p.week_id WHERE w.season_id = ? AND w.status = 'locked'`).get(season.id)
     : null;
   return {
+    enabled: getSetting('clock_enabled') !== '0',
     auto_lock: getSetting('auto_lock') === '1',
     lock_time_et: getSetting('lock_time_et') || '12:55',
     auto_open: getSetting('auto_open_week') === '1',
@@ -288,7 +298,7 @@ function clockStatus(now = new Date()) {
     nfl_week: target,
     next_lock_at: open ? open.lock_at : null,
     next_open_at: season && nextNumber && getSetting('auto_open_week') === '1'
-      ? calendar.openAtFor(nextNumber, season.year, Number.isFinite(hour) ? hour : 6).toISOString()
+      ? calendar.openAtFor(nextNumber, season.year, openHour).toISOString()
       : null,
     next_open_week: nextNumber,
     live_last_at: liveWeek?.at || null,

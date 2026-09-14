@@ -435,6 +435,9 @@ function liveBadge(picks) {
 function clockLine() {
   const c = S.clock;
   if (!c) return '';
+  if (c.enabled === false) {
+    return html`<p class="tiny text-warn clock-line">⏸ The clock is paused — locking, opening and stats are all yours until it's back on (Setup → Group settings).</p>`;
+  }
   const bits = [];
   if (c.auto_lock && c.next_lock_at) bits.push(`locks itself ${esc(fmtKickoff(c.next_lock_at))}`);
   else if (c.auto_lock) bits.push(`locks itself Sundays at ${esc(c.lock_time_et)} ET`);
@@ -3154,6 +3157,13 @@ function viewAdmin() {
         <label for="sHide">Hide everyone's picks until the week locks</label></div>
       <div class="checkline"><input type="checkbox" id="sSelf" ${raw(settings.allow_self_vote === '1' ? 'checked' : '')}>
         <label for="sSelf">Allow voting for yourself</label></div>
+
+      <hr class="sep">
+      <div class="checkline"><input type="checkbox" id="sClock" ${raw(settings.clock_enabled !== '0' ? 'checked' : '')}>
+        <label for="sClock"><b>Run the week on the clock</b> — lock Sunday, open Tuesday, live stats during games, grade itself when they end. Off, and you do all of it by hand.</label></div>
+      <label class="field" style="max-width:220px"><span>Picks lock on Sunday at (ET)</span>
+        <input id="sLockTime" type="time" value="${settings.lock_time_et || '12:55'}"></label>
+
       <button class="btn primary" id="saveGroup">Save group settings</button>
     </div>
 
@@ -3766,6 +3776,8 @@ function wireAdmin() {
         default_stake_cents: Math.round(Number($('#sStake').value) * 100),
         hide_picks_until_lock: $('#sHide').checked ? '1' : '0',
         allow_self_vote: $('#sSelf').checked ? '1' : '0',
+        clock_enabled: $('#sClock').checked ? '1' : '0',
+        lock_time_et: $('#sLockTime').value || '12:55',
       })
     );
   }

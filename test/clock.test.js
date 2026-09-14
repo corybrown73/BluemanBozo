@@ -205,3 +205,28 @@ test('games that finished before anyone was looking still get one stats pass', a
   assert.ok(again.live.skipped, 'nothing owed any more');
   db.prepare('DELETE FROM weeks WHERE week_number = 1').run();
 });
+
+test('the master switch stops everything at once', async () => {
+  setSetting('clock_enabled', '0');
+  const r = await scheduler.clockTick(at('2026-09-29T10:30:00Z')); // a Tuesday that would open week 4
+  assert.strictEqual(r.paused, true);
+  assert.strictEqual(r.opened, null);
+  assert.strictEqual(db.prepare('SELECT COUNT(*) AS n FROM weeks WHERE week_number = 4').get().n, 0);
+  assert.strictEqual(scheduler.clockStatus().enabled, false);
+  setSetting('clock_enabled', '1');
+  assert.strictEqual(scheduler.clockStatus().enabled, true);
+});
+
+test('the "next opens" line always looks forward', async () => {
+  // Week 3 is open (from the Tuesday test); the next opening is week 4's Tuesday.
+  const st = scheduler.clockStatus(at('2026-09-23T12:00:00Z'));
+  assert.strictEqual(st.next_open_week, 4);
+  assert.strictEqual(st.next_open_at, '2026-09-29T10:00:00.000Z');
+
+  // Nothing open at all, mid-week: still the coming Tuesday, never a date gone by.
+  db.prepare("UPDATE weeks SET status = 'locked' WHERE week_number = 3").run();
+  const none = scheduler.clockStatus(at('2026-09-23T12:00:00Z'));
+  assert.ok(Date.parse(none.next_open_at) > Date.parse('2026-09-23T12:00:00Z'), `next open ${none.next_open_at} is ahead`);
+  assert.strictEqual(none.next_open_week, 4);
+  db.prepare("UPDATE weeks SET status = 'open' WHERE week_number = 3").run();
+});

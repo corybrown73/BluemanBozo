@@ -274,6 +274,7 @@ const DEFAULT_SETTINGS = {
   // (0=Sun ... 2=Tue, 4=Thu, 6=Sat).
   // The clock: the app locks, opens and updates on its own. Each can be
   // switched off, and every one of them can still be done by hand.
+  clock_enabled: '1',           // the master switch: off, and nothing below runs
   auto_lock: '1',
   lock_time_et: '12:55',        // Sunday, Eastern — the early window's kickoff minus five
   auto_open_hour_et: '6',       // Tuesday morning, Eastern
