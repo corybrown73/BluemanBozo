@@ -548,3 +548,14 @@ test('the lock time has to be a time', async () => {
   assert.strictEqual(ok.data.settings.clock_enabled, '0');
   await call('PATCH', '/api/admin/settings', { lock_time_et: '12:55', clock_enabled: '1' });
 });
+
+test('the live stats interval is whole minutes, one to sixty', async () => {
+  const bad = await call('PATCH', '/api/admin/settings', { live_interval_minutes: '0' });
+  assert.strictEqual(bad.status, 400);
+  assert.match(bad.data.error, /1 to 60/);
+  assert.strictEqual((await call('PATCH', '/api/admin/settings', { live_interval_minutes: 'often' })).status, 400);
+  const ok = await call('PATCH', '/api/admin/settings', { live_interval_minutes: '5' });
+  assert.strictEqual(ok.status, 200);
+  assert.strictEqual(ok.data.settings.live_interval_minutes, '5');
+  await call('PATCH', '/api/admin/settings', { live_interval_minutes: '1' });
+});

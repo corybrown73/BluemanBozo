@@ -132,6 +132,8 @@ function createWeek(weekNumber, now = new Date()) {
  */
 let clockTimer = null;
 let lastLiveAt = 0;
+/** After ESPN fails, no live pull before this instant — a hiccup must not become a minute-by-minute hammering. */
+let liveHoldUntil = 0;
 
 function lockDueWeeks(now) {
   if (getSetting('auto_lock') !== '1') return 0;
@@ -219,15 +221,30 @@ async function liveTick(now, { fetchStats = boxscore.statsForPicks, force = fals
     .get(season.id);
   if (!week) return { skipped: 'nothing locked' };
 
-  const picks = game.rawPicks(week.id);
+  // Only what is still in play. A settled pick's box score cannot change, so
+  // its game is never asked for again — at a minute's cadence that is most of
+  // the calls saved.
+  const picks = game.rawPicks(week.id).filter((p) => p.result === 'pending');
   const catchUpPass = owedAPass(picks, now);
   if (!force && !catchUpPass && !gamesLive(picks, now)) return { skipped: 'no games on' };
-  const interval = (parseInt(getSetting('live_interval_minutes'), 10) || 15) * 60000;
-  if (!force && !catchUpPass && now.getTime() - lastLiveAt < interval) return { skipped: 'too soon' };
+  if (!force && now.getTime() < liveHoldUntil) return { skipped: 'backing off' };
+  const interval = (parseInt(getSetting('live_interval_minutes'), 10) || 1) * 60000;
+  // The clock ticks once a minute and lands a few milliseconds late each time;
+  // a minute's interval has to fire on every tick, so drift is forgiven.
+  if (!force && !catchUpPass && now.getTime() - lastLiveAt < interval - 5000) return { skipped: 'too soon' };
   lastLiveAt = now.getTime();
 
-  const stats = await fetchStats(picks, { force: true });
-  if (stats.error) return { week_id: week.id, error: stats.error };
+  let stats;
+  try {
+    stats = await fetchStats(picks, { force: true });
+  } catch (err) {
+    stats = { error: `Could not reach ESPN: ${err.message}` };
+  }
+  if (stats.error) {
+    liveHoldUntil = now.getTime() + 5 * 60000;
+    return { week_id: week.id, error: stats.error };
+  }
+  liveHoldUntil = 0;
   game.applyLive(week.id, stats);
 
   // Final results settle themselves. The week flips to voting only once every
@@ -294,7 +311,7 @@ function clockStatus(now = new Date()) {
     lock_time_et: getSetting('lock_time_et') || '12:55',
     auto_open: getSetting('auto_open_week') === '1',
     live_stats: getSetting('live_stats') === '1',
-    live_interval_minutes: parseInt(getSetting('live_interval_minutes'), 10) || 15,
+    live_interval_minutes: parseInt(getSetting('live_interval_minutes'), 10) || 1,
     nfl_week: target,
     next_lock_at: open ? open.lock_at : null,
     next_open_at: season && nextNumber && getSetting('auto_open_week') === '1'

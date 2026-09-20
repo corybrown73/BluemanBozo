@@ -442,7 +442,10 @@ function clockLine() {
   if (c.auto_lock && c.next_lock_at) bits.push(`locks itself ${esc(fmtKickoff(c.next_lock_at))}`);
   else if (c.auto_lock) bits.push(`locks itself Sundays at ${esc(c.lock_time_et)} ET`);
   if (c.auto_open && c.next_open_at) bits.push(`week ${esc(c.next_open_week)} opens ${esc(fmtKickoff(c.next_open_at))}`);
-  if (c.live_stats) bits.push(`stats every ${esc(c.live_interval_minutes)} min during games, then grades itself`);
+  if (c.live_stats) {
+    const every = parseInt(c.live_interval_minutes, 10) || 1;
+    bits.push(`stats ${every === 1 ? 'every minute' : `every ${every} min`} during games, then grades itself`);
+  }
   if (!bits.length) return '';
   return html`<p class="tiny muted clock-line">🕒 On the clock: ${raw(bits.join(' · '))}. Everything below is the override.</p>`;
 }
@@ -3190,8 +3193,13 @@ function viewAdmin() {
       <hr class="sep">
       <div class="checkline"><input type="checkbox" id="sClock" ${raw(settings.clock_enabled !== '0' ? 'checked' : '')}>
         <label for="sClock"><b>Run the week on the clock</b> — lock Sunday, open Tuesday, live stats during games, grade itself when they end. Off, and you do all of it by hand.</label></div>
-      <label class="field" style="max-width:220px"><span>Picks lock on Sunday at (ET)</span>
-        <input id="sLockTime" type="time" value="${settings.lock_time_et || '12:55'}"></label>
+      <div class="grid two">
+        <label class="field"><span>Picks lock on Sunday at (ET)</span>
+          <input id="sLockTime" type="time" value="${settings.lock_time_et || '12:55'}"></label>
+        <label class="field"><span>Live stats every (minutes)</span>
+          <input id="sLiveEvery" type="number" min="1" max="60" step="1" value="${raw(parseInt(settings.live_interval_minutes, 10) || 1)}"></label>
+      </div>
+      <p class="tiny faint">Stats are pulled only while a game with a pick in it is on. ESPN is free, so every minute is fine.</p>
 
       <button class="btn primary" id="saveGroup">Save group settings</button>
     </div>
@@ -3836,6 +3844,7 @@ function wireAdmin() {
         allow_self_vote: $('#sSelf').checked ? '1' : '0',
         clock_enabled: $('#sClock').checked ? '1' : '0',
         lock_time_et: $('#sLockTime').value || '12:55',
+        live_interval_minutes: $('#sLiveEvery').value || '1',
       })
     );
   }

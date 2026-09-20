@@ -108,12 +108,37 @@ test('during the games, box scores land on each pick without grading anything', 
 test('a second look inside the interval is skipped; outside the game window nothing is fetched', async () => {
   let calls = 0;
   const fetchStats = async () => { calls += 1; return { results: [], unresolved: [] }; };
-  const soon = await scheduler.clockTick(at('2026-09-20T18:35:00Z'), { fetchStats });
+  const soon = await scheduler.clockTick(at('2026-09-20T18:30:30Z'), { fetchStats });
   assert.strictEqual(soon.live.skipped, 'too soon');
   // Sunday 11pm ET: the games are long over, and it is still week 2's window.
   const lateNight = await scheduler.clockTick(at('2026-09-21T03:00:00Z'), { fetchStats });
   assert.strictEqual(lateNight.live.skipped, 'no games on');
   assert.strictEqual(calls, 0, 'ESPN was never called');
+});
+
+test("at a minute's interval every tick pulls, and a failed pull waits five minutes before the next", async () => {
+  let calls = 0;
+  let fail = false;
+  const fetchStats = async () => {
+    calls += 1;
+    return fail ? { results: [], unresolved: [], error: 'Could not reach ESPN: ESPN returned 429' } : { results: [], unresolved: [] };
+  };
+  // The clock's ticks land a few milliseconds late; a minute's interval still fires on every one.
+  const next = await scheduler.clockTick(at('2026-09-20T18:31:00.020Z'), { fetchStats });
+  assert.ok(!next.live.skipped, JSON.stringify(next.live));
+  assert.strictEqual(calls, 1);
+
+  fail = true;
+  const failed = await scheduler.clockTick(at('2026-09-20T18:32:00Z'), { fetchStats });
+  assert.match(failed.live.error, /429/);
+  assert.strictEqual(calls, 2);
+  fail = false;
+  assert.strictEqual((await scheduler.clockTick(at('2026-09-20T18:33:00Z'), { fetchStats })).live.skipped, 'backing off');
+  assert.strictEqual((await scheduler.clockTick(at('2026-09-20T18:36:30Z'), { fetchStats })).live.skipped, 'backing off');
+  assert.strictEqual(calls, 2, 'nothing asked while backing off');
+  const resumed = await scheduler.clockTick(at('2026-09-20T18:37:00Z'), { fetchStats });
+  assert.ok(!resumed.live.skipped, JSON.stringify(resumed.live));
+  assert.strictEqual(calls, 3);
 });
 
 test('when the games go final the week grades itself — except a player who never showed', async () => {
@@ -135,6 +160,14 @@ test('when the games go final the week grades itself — except a player who nev
   assert.strictEqual(after['Khalil Shakir'].result, 'loss');
   assert.strictEqual(after['Benched Guy'].result, 'pending', 'a DNP is a human decision, never a zero');
   assert.strictEqual(weekRow(2).status, 'locked', 'so voting does not open on its own yet');
+
+  // Kelce and Shakir are settled and their box scores cannot change, so the
+  // next pull asks ESPN about the one pick still in play and nothing else.
+  const asked = [];
+  await scheduler.clockTick(at('2026-09-20T21:02:00Z'), {
+    fetchStats: async (picks) => { asked.push(...picks.map((p) => p.player)); return { results: [], unresolved: [] }; },
+  });
+  assert.deepStrictEqual(asked, ['Benched Guy']);
 
   // The commissioner voids the no-show; the week is settled and voting opens.
   game.gradePicks(weekRow(2), [{ pick_id: byName['Benched Guy'].id, result: 'void' }]);

@@ -279,7 +279,7 @@ const DEFAULT_SETTINGS = {
   lock_time_et: '12:55',        // Sunday, Eastern — the early window's kickoff minus five
   auto_open_hour_et: '6',       // Tuesday morning, Eastern
   live_stats: '1',
-  live_interval_minutes: '15',
+  live_interval_minutes: '1',
   schedule_enabled: '0',
   schedule_timezone: 'America/New_York',
   cron_open:  '0 12 * * 6',   // Saturday noon - get your bets in, board is live

@@ -134,6 +134,7 @@ const EDITABLE_SETTINGS = new Set([
   'odds_api_key',
   'clock_enabled',
   'lock_time_et',
+  'live_interval_minutes',
 ]);
 
 router.get('/settings', (req, res) => {
@@ -162,6 +163,15 @@ router.patch('/settings', (req, res) => {
         return res.status(400).json({ error: `"${value}" is not a time. Use HH:MM, Eastern — 12:55 for the early kickoff.` });
       }
       setSetting(key, `${String(+m[1]).padStart(2, '0')}:${m[2]}`);
+      changed.push(key);
+      continue;
+    }
+    if (key === 'live_interval_minutes') {
+      const n = parseInt(value, 10);
+      if (!Number.isInteger(n) || n < 1 || n > 60) {
+        return res.status(400).json({ error: 'Live stats interval must be a whole number of minutes from 1 to 60.' });
+      }
+      setSetting(key, String(n));
       changed.push(key);
       continue;
     }
