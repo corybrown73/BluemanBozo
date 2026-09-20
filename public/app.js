@@ -3016,6 +3016,8 @@ function viewAdmin() {
           ? html`<div class="row" style="margin-bottom:14px">
               <b>Week ${w.week_number}</b>
               <span class="tiny faint">${S.week.picks.length} picks in</span>
+              <button class="btn sm ghost" id="renumberWeek"
+                title="Opened out of order? Give this week its right number — if that number is taken, the two weeks trade places">Wrong number?</button>
               <div class="spacer" style="margin-left:auto"></div>
               ${raw(
                 w.status === 'open'
@@ -3639,6 +3641,35 @@ function wireAdmin() {
         render();
       } catch (err) {
         toast(err.message, 'err');
+      }
+    });
+  }
+
+  // Weeks opened out of order read backwards; the fix is a number, not a
+  // rebuild, and the server keeps everything else where it is.
+  const renumber = $('#renumberWeek');
+  if (renumber) {
+    renumber.addEventListener('click', async () => {
+      const n = S.week.week.week_number;
+      const answer = prompt(
+        `This is showing as week ${n}. What week should it be?\n\nIf that number is already taken, the two weeks trade places. Picks, stats and the bozo all stay put.`,
+        String(n)
+      );
+      if (answer === null) return;
+      const to = parseInt(answer, 10);
+      if (!Number.isInteger(to) || to < 1 || to > 22) return toast('Enter a week number from 1 to 22.', 'err');
+      if (to === n) return;
+      renumber.disabled = true;
+      try {
+        const r = await api(`/api/weeks/${S.week.week.id}/renumber`, { method: 'POST', body: { week_number: to } });
+        S.adminData = null;
+        S.historyRows = null;
+        await loadState();
+        toast(r.notes.join(' '), 'ok', 10000);
+        render();
+      } catch (err) {
+        toast(err.message, 'err', 7000);
+        renumber.disabled = false;
       }
     });
   }

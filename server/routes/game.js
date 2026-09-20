@@ -149,6 +149,108 @@ router.patch('/weeks/:id', requireAdmin, (req, res) => {
 });
 
 /**
+ * Give a week its right number. One opened too soon leaves the record reading
+ * backwards — last Sunday's stats filed under week 2, this Sunday's picks
+ * under week 1 — and nothing else is wrong with either. So nothing else
+ * moves: every pick, stat line, vote and crown stays with its week, and if
+ * the number asked for is taken, the two weeks trade places.
+ *
+ * Two things hang off the number and are re-derived for the weeks that
+ * moved (and the ones right after them, whose bill may have come from a
+ * week that moved): who is on the hook — the previous week's bozo — and,
+ * for a week still open, when it locks — that week's Sunday.
+ */
+router.post('/weeks/:id/renumber', requireAdmin, (req, res) => {
+  const week = game.getWeek(parseInt(req.params.id, 10));
+  if (!week) return res.status(404).json({ error: 'Week not found.' });
+  const target = Number(req.body?.week_number);
+  if (!Number.isInteger(target) || target < 1 || target > 22) {
+    return res.status(400).json({ error: 'Week number must be a whole number from 1 to 22.' });
+  }
+  const from = week.week_number;
+  if (target === from) return res.status(400).json({ error: `This is already week ${from}.` });
+
+  const season = db.prepare('SELECT * FROM seasons WHERE id = ?').get(week.season_id);
+  const other = db.prepare('SELECT * FROM weeks WHERE season_id = ? AND week_number = ?').get(week.season_id, target);
+  const notes = [];
+
+  db.transaction(() => {
+    const bozoOf = db.prepare(
+      `SELECT b.user_id FROM bozos b JOIN weeks w ON w.id = b.week_id WHERE w.season_id = ? AND w.week_number = ?`
+    );
+    const moved = other ? [week.id, other.id] : [week.id];
+    // Whose bill any of these weeks might be carrying from before the move:
+    // the bozo of a week that moved, or of the week that used to sit in
+    // front of one. Read under the old numbering, before anything shifts.
+    const staleSources = new Set();
+    for (const n of [from - 1, target - 1]) {
+      const b = bozoOf.get(season.id, n)?.user_id;
+      if (b) staleSources.add(b);
+    }
+    for (const id of moved) {
+      const b = game.getBozo(id)?.user_id;
+      if (b) staleSources.add(b);
+    }
+
+    const setNumber = db.prepare('UPDATE weeks SET week_number = ? WHERE id = ?');
+    // The pair is unique per season, so go by way of a number nothing uses.
+    setNumber.run(-week.id, week.id);
+    if (other) setNumber.run(from, other.id);
+    setNumber.run(target, week.id);
+    notes.push(
+      other
+        ? `Week ${from} is now week ${target}, and week ${target} is now week ${from}.`
+        : `Week ${from} is now week ${target}.`
+    );
+    notes.push('Every pick, stat line, vote and crown stayed with its week.');
+    const byNumber = db.prepare('SELECT * FROM weeks WHERE season_id = ? AND week_number = ?');
+    const setPayer = db.prepare('UPDATE weeks SET payer_user_id = ? WHERE id = ?');
+    const nameOf = (id) => db.prepare('SELECT display_name FROM users WHERE id = ?').get(id)?.display_name || 'Somebody';
+
+    for (const n of new Set([from, target, from + 1, target + 1])) {
+      const w = byNumber.get(season.id, n);
+      if (!w) continue;
+      const owed = bozoOf.get(season.id, n - 1)?.user_id || null;
+      if (owed) {
+        if (w.payer_user_id !== owed) setPayer.run(owed, w.id);
+        if (w.status !== 'final') notes.push(`${nameOf(owed)} is on the hook for week ${n}'s ticket.`);
+      } else if (w.payer_user_id && staleSources.has(w.payer_user_id)) {
+        // The bill came from a week that is no longer in front of this one.
+        setPayer.run(null, w.id);
+      }
+    }
+
+    if (getSetting('auto_lock') === '1') {
+      const time = getSetting('lock_time_et') || '12:55';
+      for (const id of moved) {
+        const w = game.getWeek(id);
+        if (w.status !== 'open') continue;
+        const at = calendar.lockAtFor(w.week_number, season.year, time);
+        if (at.getTime() <= Date.now()) {
+          db.prepare(`UPDATE weeks SET lock_at = ?, status = 'locked' WHERE id = ?`).run(at.toISOString(), w.id);
+          notes.push(`Week ${w.week_number}'s lock time has passed, so its picks are locked.`);
+        } else {
+          db.prepare('UPDATE weeks SET lock_at = ? WHERE id = ?').run(at.toISOString(), w.id);
+          const when = at.toLocaleString('en-US', {
+            timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit',
+          });
+          notes.push(`Week ${w.week_number} locks ${when} ET.`);
+        }
+      }
+    }
+  })();
+
+  res.json({
+    ok: true,
+    from,
+    to: target,
+    swapped_with: other ? { id: other.id, week_number: from } : null,
+    notes,
+    week: game.weekDetail(week.id, req.user),
+  });
+});
+
+/**
  * Undo an accidentally opened week. Only an EMPTY one: deleting a week takes
  * its picks, votes and bozo with it, and that is the season's record, not a
  * slip to be undone with a button.
