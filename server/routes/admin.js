@@ -135,6 +135,8 @@ const EDITABLE_SETTINGS = new Set([
   'clock_enabled',
   'lock_time_et',
   'live_interval_minutes',
+  'auto_crown',
+  'season_last_week',
 ]);
 
 router.get('/settings', (req, res) => {
@@ -163,6 +165,20 @@ router.patch('/settings', (req, res) => {
         return res.status(400).json({ error: `"${value}" is not a time. Use HH:MM, Eastern — 12:55 for the early kickoff.` });
       }
       setSetting(key, `${String(+m[1]).padStart(2, '0')}:${m[2]}`);
+      changed.push(key);
+      continue;
+    }
+    if (key === 'season_last_week') {
+      const n = parseInt(value, 10);
+      if (!Number.isInteger(n) || n < 1 || n > 22) {
+        return res.status(400).json({ error: 'The last week must be a whole number from 1 to 22.' });
+      }
+      setSetting(key, String(n));
+      changed.push(key);
+      continue;
+    }
+    if (key === 'auto_crown') {
+      setSetting(key, value === '0' || value === false || value === 0 ? '0' : '1');
       changed.push(key);
       continue;
     }
@@ -385,6 +401,41 @@ router.post('/history/import', (req, res) => {
 router.post('/cache/clear', (req, res) => {
   const info = db.prepare('DELETE FROM odds_cache').run();
   res.json({ ok: true, cleared: info.changes });
+});
+
+/**
+ * The whole record as a spreadsheet — the backup that lives on a laptop.
+ * Everything the app knows about a pick, one row each, oldest first.
+ */
+router.get('/export.csv', (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT s.year, w.week_number, w.status AS week_status, u.display_name AS member,
+              p.player, p.market_label, p.selection, p.line, p.price, p.result, p.actual_value, p.trash_talk,
+              (SELECT bu.display_name FROM bozos b JOIN users bu ON bu.id = b.user_id WHERE b.week_id = w.id) AS bozo,
+              (SELECT b.roast FROM bozos b WHERE b.week_id = w.id) AS roast
+       FROM picks p
+       JOIN weeks w ON w.id = p.week_id
+       JOIN seasons s ON s.id = w.season_id
+       JOIN users u ON u.id = p.user_id
+       ORDER BY s.year, w.week_number, u.display_name`
+    )
+    .all();
+  const cell = (v) => {
+    const t = v === null || v === undefined ? '' : String(v);
+    return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  };
+  const header = ['season', 'week', 'week_status', 'member', 'player', 'market', 'side', 'line', 'price', 'result', 'actual', 'bozo', 'roast', 'trash_talk'];
+  const lines = [header.join(',')].concat(
+    rows.map((r) =>
+      [r.year, r.week_number, r.week_status, r.member, r.player, r.market_label, r.selection, r.line, r.price, r.result, r.actual_value, r.bozo, r.roast, r.trash_talk]
+        .map(cell)
+        .join(',')
+    )
+  );
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="blue-man-bozo-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send(lines.join('\n') + '\n');
 });
 
 module.exports = router;

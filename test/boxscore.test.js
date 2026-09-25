@@ -160,9 +160,28 @@ test('every market the group can pick is gradeable, or says why not', () => {
   // Rush + Rec yards sums two categories for the same player.
   assert.strictEqual(box.readStat('player_rush_reception_yds', pacheco), 110, '84 rushing + 26 receiving');
 
-  // First TD cannot come from a box score, and is declared rather than faked.
-  assert.ok(box.UNGRADEABLE.player_1st_td, 'first TD is flagged ungradeable');
-  assert.strictEqual(box.STAT_MAP.player_1st_td, undefined, 'and has no mapping to accidentally use');
+  // First TD cannot come from a box score column; it is read off the scoring plays instead.
+  assert.ok(box.PLAY_GRADED.player_1st_td, 'first TD is graded from the plays');
+  assert.strictEqual(box.STAT_MAP.player_1st_td, undefined, 'and has no stat column to accidentally use');
+});
+
+test('the first touchdown is read off the scoring plays, whoever scored it', () => {
+  const sum = {
+    scoringPlays: [
+      { type: { text: 'Field Goal' }, scoringType: { name: 'field-goal' }, text: 'Harrison Butker 42 Yd Field Goal' },
+      { type: { text: 'Rushing Touchdown' }, scoringType: { name: 'touchdown' }, text: "Kenneth Walker III 5 Yd Run (Jason Myers Kick)" },
+      { type: { text: 'Passing Touchdown' }, scoringType: { name: 'touchdown' }, text: 'Travis Kelce 12 Yd pass from Patrick Mahomes (Harrison Butker Kick)' },
+    ],
+  };
+  const first = box.firstTouchdown(sum);
+  assert.strictEqual(first.name, 'Kenneth Walker III', 'the field goal does not count; the first TD does');
+  assert.strictEqual(first.key, 'kenneth walker', 'suffix dropped, so the book\'s spelling matches');
+
+  const apostrophe = box.firstTouchdown({ scoringPlays: [{ type: { text: 'Passing Touchdown' }, text: "Ja'Marr Chase 60 Yd pass from Joe Burrow (Evan McPherson Kick)" }] });
+  assert.strictEqual(apostrophe.key, 'jamarr chase');
+
+  assert.strictEqual(box.firstTouchdown({ scoringPlays: [{ type: { text: 'Field Goal' }, text: 'Someone 30 Yd Field Goal' }] }), null, 'no touchdown yet');
+  assert.strictEqual(box.firstTouchdown({}), null);
 });
 
 test('completions and attempts are split out of the single C/ATT cell', () => {
@@ -176,7 +195,7 @@ test('no market we offer is silently unmapped', () => {
   const odds = require('../server/odds');
   const missing = odds.MARKETS
     .map((m) => m.key)
-    .filter((k) => !box.STAT_MAP[k] && !box.UNGRADEABLE[k]);
+    .filter((k) => !box.STAT_MAP[k] && !box.UNGRADEABLE[k] && !box.PLAY_GRADED[k]);
   assert.deepStrictEqual(missing, [],
     `these markets can be picked but not graded: ${missing.join(', ')}`);
 });

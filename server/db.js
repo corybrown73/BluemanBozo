@@ -277,7 +277,11 @@ const DEFAULT_SETTINGS = {
   clock_enabled: '1',           // the master switch: off, and nothing below runs
   auto_lock: '1',
   lock_time_et: '12:55',        // Sunday, Eastern — the early window's kickoff minus five
-  auto_open_hour_et: '6',       // Tuesday morning, Eastern
+  auto_open_hour_et: '6',
+  // The vote closes itself Tuesday morning; the commissioner can still overrule.
+  auto_crown: '1',
+  // The clock opens no week past this one. 18 is the regular season.
+  season_last_week: '18',       // Tuesday morning, Eastern
   live_stats: '1',
   live_interval_minutes: '1',
   schedule_enabled: '0',

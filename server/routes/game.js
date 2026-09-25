@@ -79,6 +79,18 @@ router.post('/weeks', requireAdmin, (req, res) => {
     return res.status(409).json({ error: `Week ${weekNumber} already exists for ${season.label}.` });
   }
 
+  // Two open weeks means the pick board quietly fills the newer one while
+  // everyone thinks they are picking the older — the slip that reverses a
+  // season's numbering. One at a time.
+  const stillOpen = db
+    .prepare(`SELECT week_number FROM weeks WHERE season_id = ? AND status = 'open' ORDER BY week_number DESC LIMIT 1`)
+    .get(season.id);
+  if (stillOpen) {
+    return res.status(409).json({
+      error: `Week ${stillOpen.week_number} is still open for picks. Lock it first — the next week opens itself on Tuesday.`,
+    });
+  }
+
   // Whoever was the bozo last week is on the hook for this week's ticket.
   const prevBozo = db
     .prepare(
@@ -537,61 +549,18 @@ router.post('/weeks/:id/bozo', requireAdmin, (req, res) => {
     return res.status(409).json({ error: 'Grade the picks before crowning a bozo.' });
   }
 
-  const picks = game.rawPicks(week.id).map(game.decoratePick);
-  const votes = game.getVotes(week.id);
-
-  let resolution;
-  if (req.body?.user_id) {
-    const forced = parseInt(req.body.user_id, 10);
-    const tally = votes.filter((v) => v.nominee_id === forced).length;
-    resolution = { user_id: forced, method: 'commissioner', votes_received: tally };
-  } else {
-    resolution = scoring.resolveBozo(votes, picks);
+  const forced = req.body?.user_id ? parseInt(req.body.user_id, 10) : null;
+  if (forced && !db.prepare('SELECT 1 FROM users WHERE id = ?').get(forced)) {
+    return res.status(400).json({ error: 'That person is not in the group.' });
   }
 
-  if (!resolution) {
+  const crowned = game.crownBozo(week, { userId: forced, roastText: req.body?.roast || null });
+  if (!crowned) {
     return res.status(400).json({
       error: 'Nobody lost this week — no bozo to crown.',
       perfect_week: roastEngine.perfectWeek(`w${week.id}`),
     });
   }
-
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(resolution.user_id);
-  if (!user) return res.status(400).json({ error: 'That person is not in the group.' });
-
-  // Count every OTHER week's bozos, then add this one — re-crowning the same
-  // person must not count their existing row for this week twice.
-  const priorCount = db
-    .prepare('SELECT COUNT(*) AS n FROM bozos WHERE user_id = ? AND week_id <> ?')
-    .get(user.id, week.id).n;
-  const careerCount = priorCount + 1;
-  const losingPick = picks.find((p) => p.user_id === user.id && p.result === 'loss') || null;
-  const roastLine =
-    req.body?.roast?.trim() ||
-    roastEngine.roast({
-      name: user.display_name,
-      week: week.week_number,
-      group: getSetting('group_name'),
-      count: careerCount,
-      pick: losingPick,
-      seed: `w${week.id}u${user.id}`,
-    });
-
-  const finalize = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO bozos (week_id, user_id, method, votes_received, roast) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(week_id) DO UPDATE SET user_id = excluded.user_id, method = excluded.method,
-         votes_received = excluded.votes_received, roast = excluded.roast, created_at = datetime('now')`
-    ).run(week.id, user.id, resolution.method, resolution.votes_received || 0, roastLine);
-
-    db.prepare("UPDATE weeks SET status = 'final' WHERE id = ?").run(week.id);
-
-    // The bozo owes next week's ticket.
-    db.prepare(
-      `UPDATE weeks SET payer_user_id = ? WHERE season_id = ? AND week_number = ?`
-    ).run(user.id, week.season_id, week.week_number + 1);
-  });
-  finalize();
 
   res.json(game.weekDetail(week.id, req.user));
 });

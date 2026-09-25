@@ -68,13 +68,35 @@ const STAT_MAP = {
 };
 
 /**
- * Markets a box score cannot settle. First TD scorer needs the order goals
- * were scored in, which is play-by-play, not a box score. Saying so is better
- * than reading "1 rushing TD" and calling it first.
+ * Markets the feed cannot settle at all. First TD used to live here — a box
+ * score has no scoring order — until the summary's scoring plays, which do,
+ * were read instead (see firstTouchdown). Kept for the next such market.
  */
-const UNGRADEABLE = {
-  player_1st_td: 'First TD needs the scoring order, which a box score does not carry.',
-};
+const UNGRADEABLE = {};
+
+/** Markets settled from the scoring plays rather than a stat column. */
+const PLAY_GRADED = { player_1st_td: 'the first touchdown in the scoring plays' };
+
+/**
+ * Who scored the game's first touchdown, from the scoring plays ESPN lists
+ * in order. The play text leads with the scorer — "Travis Kelce 12 Yd pass
+ * from Patrick Mahomes (Harrison Butker Kick)", "Isiah Pacheco 3 Yd Run",
+ * "Kenneth Walker III 5 Yd Run" — so the name is everything before the
+ * first number.
+ * @returns {{name: string, key: string, text: string} | null}
+ */
+function firstTouchdown(sum) {
+  const plays = Array.isArray(sum?.scoringPlays) ? sum.scoringPlays : [];
+  const td = plays.find((p) => {
+    const kind = `${p?.scoringType?.name || ''} ${p?.type?.text || ''}`.toLowerCase();
+    return kind.includes('touchdown');
+  });
+  if (!td) return null;
+  const text = String(td.text || '');
+  const name = text.split(/\s+\d/)[0].trim();
+  if (!name) return null;
+  return { name, key: normalizeName(name), text };
+}
 
 /* ---------------- fetching, with the same cache the other feeds use ---------------- */
 
@@ -278,13 +300,43 @@ async function statsForPicks(picks, { force = false } = {}) {
 
     if (!summaries.has(event.id)) {
       try {
-        summaries.set(event.id, playersFromSummary(await summary(event.id, { force })));
+        const sum = await summary(event.id, { force });
+        summaries.set(event.id, { players: playersFromSummary(sum), firstTd: firstTouchdown(sum) });
       } catch (err) {
         unresolved.push({ pick_id: pick.id, player: pick.player, reason: `Box score unavailable: ${err.message}` });
         continue;
       }
     }
-    const players = summaries.get(event.id);
+    const { players, firstTd } = summaries.get(event.id);
+
+    // First TD is settled by the first touchdown, whoever scored it and
+    // however much game is left — so it is final the moment one lands.
+    if (pick.market === 'player_1st_td') {
+      if (!firstTd) {
+        unresolved.push({
+          pick_id: pick.id,
+          player: pick.player,
+          reason: final ? 'No touchdown in the game — books void this one.' : 'No touchdown yet.',
+          ...clock,
+        });
+        continue;
+      }
+      results.push({
+        pick_id: pick.id,
+        player: pick.player,
+        matched_as: firstTd.name,
+        market: pick.market,
+        market_label: pick.market_label,
+        actual_value: firstTd.key === normalizeName(pick.player) ? 1 : 0,
+        source: 'espn',
+        ...clock,
+        final: true,
+        live: false,
+        detail: `First TD: ${firstTd.name}`,
+      });
+      continue;
+    }
+
     const entry = players.get(normalizeName(pick.player));
 
     if (!entry) {
@@ -335,7 +387,9 @@ async function statsForPicks(picks, { force = false } = {}) {
 
 module.exports = {
   statsForPicks,
+  firstTouchdown,
   UNGRADEABLE,
+  PLAY_GRADED,
   playersFromSummary,
   readStat,
   matchEvent,

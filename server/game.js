@@ -322,6 +322,59 @@ function applyLive(weekId, { results = [], unresolved = [] } = {}) {
   return n;
 }
 
+/**
+ * Crown the week's bozo and close the week. A `userId` forces a name (a
+ * commissioner ruling); otherwise the vote decides, with ties and silence
+ * settled by the Bozo Index. Returns null when nobody lost — a perfect week —
+ * and leaves what that means to the caller.
+ */
+function crownBozo(week, { userId = null, roastText = null } = {}) {
+  const picks = rawPicks(week.id).map(decoratePick);
+  const votes = getVotes(week.id);
+  let resolution;
+  if (userId) {
+    const tally = votes.filter((v) => v.nominee_id === userId).length;
+    resolution = { user_id: userId, method: 'commissioner', votes_received: tally };
+  } else {
+    resolution = scoring.resolveBozo(votes, picks);
+  }
+  if (!resolution) return null;
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(resolution.user_id);
+  if (!user) return null;
+
+  // Count every OTHER week's bozos, then add this one — re-crowning the same
+  // person must not count their existing row for this week twice.
+  const priorCount = db
+    .prepare('SELECT COUNT(*) AS n FROM bozos WHERE user_id = ? AND week_id <> ?')
+    .get(user.id, week.id).n;
+  const losingPick = picks.find((p) => p.user_id === user.id && p.result === 'loss') || null;
+  const line =
+    (roastText || '').trim() ||
+    roast.roast({
+      name: user.display_name,
+      week: week.week_number,
+      group: getSetting('group_name'),
+      count: priorCount + 1,
+      pick: losingPick,
+      seed: `w${week.id}u${user.id}`,
+    });
+
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO bozos (week_id, user_id, method, votes_received, roast) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(week_id) DO UPDATE SET user_id = excluded.user_id, method = excluded.method,
+         votes_received = excluded.votes_received, roast = excluded.roast, created_at = datetime('now')`
+    ).run(week.id, user.id, resolution.method, resolution.votes_received || 0, line);
+    db.prepare("UPDATE weeks SET status = 'final' WHERE id = ?").run(week.id);
+    // The bozo owes next week's ticket.
+    db.prepare('UPDATE weeks SET payer_user_id = ? WHERE season_id = ? AND week_number = ?').run(
+      user.id, week.season_id, week.week_number + 1
+    );
+  })();
+
+  return { user, roast: line, method: resolution.method, votes_received: resolution.votes_received || 0 };
+}
+
 /** Season + all-time standings, with streaks and pick records. */
 function leaderboard({ seasonId = null } = {}) {
   const users = listUsers({ includeInactive: true });
@@ -429,7 +482,23 @@ function leaderboard({ seasonId = null } = {}) {
         a.user.display_name.localeCompare(b.user.display_name)
     );
 
-  return { season, rows, accuracy, group: groupStats(season.id), min_picks_to_qualify: MIN_PICKS };
+  // Who the group keeps coming back to, and how that has gone.
+  const players = db
+    .prepare(
+      `SELECT p.player,
+              COUNT(*) AS picks,
+              SUM(CASE WHEN p.result = 'win' THEN 1 ELSE 0 END) AS wins,
+              SUM(CASE WHEN p.result = 'loss' THEN 1 ELSE 0 END) AS losses,
+              GROUP_CONCAT(DISTINCT u.display_name) AS by_whom
+       FROM picks p JOIN weeks w ON w.id = p.week_id JOIN users u ON u.id = p.user_id
+       WHERE w.season_id = ?
+       GROUP BY p.player HAVING COUNT(*) >= 2
+       ORDER BY picks DESC, wins DESC, p.player ASC LIMIT 5`
+    )
+    .all(season.id)
+    .map((r) => ({ ...r, by_whom: String(r.by_whom || '').split(',') }));
+
+  return { season, rows, accuracy, group: groupStats(season.id), min_picks_to_qualify: MIN_PICKS, players };
 }
 
 /**
@@ -534,6 +603,7 @@ function history({ limit = 50 } = {}) {
 }
 
 module.exports = {
+  crownBozo,
   STATUSES,
   statusRank,
   listUsers,

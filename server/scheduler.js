@@ -171,6 +171,50 @@ function setDefaultLocks(now) {
   return n;
 }
 
+/** The clock opens nothing past this week: 18 unless the group plays on. */
+function lastWeek() {
+  const n = parseInt(getSetting('season_last_week'), 10);
+  return Number.isInteger(n) && n >= 1 && n <= 22 ? n : 18;
+}
+
+/** SQLite's datetime('now') text, as an instant. */
+function sqlInstant(text) {
+  if (!text) return NaN;
+  const s = String(text);
+  return Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(s) ? s : s.replace(' ', 'T') + 'Z');
+}
+
+/**
+ * A week left in "voting" gets its crown on Tuesday morning, when the next
+ * one opens: the votes that are in decide, the Bozo Index breaks ties and
+ * silence, and the commissioner can still overrule. A week graded late — a
+ * no-show voided on Wednesday, say — gets half a day of voting first.
+ */
+function crownDueWeeks(now) {
+  if (getSetting('auto_crown') !== '1') return [];
+  const season = activeSeason();
+  if (!season) return [];
+  const hour = parseInt(getSetting('auto_open_hour_et'), 10);
+  const openHour = Number.isFinite(hour) ? hour : 6;
+  const out = [];
+  for (const w of db.prepare(`SELECT * FROM weeks WHERE season_id = ? AND status = 'graded'`).all(season.id)) {
+    if (now.getTime() < calendar.openAtFor(w.week_number + 1, season.year, openHour).getTime()) continue;
+    const settled = sqlInstant(
+      db.prepare('SELECT MAX(COALESCE(graded_at, updated_at)) AS at FROM picks WHERE week_id = ?').get(w.id).at
+    );
+    if (Number.isFinite(settled) && now.getTime() - settled < 12 * 3600000) continue;
+    const crowned = game.crownBozo(w);
+    if (crowned) {
+      out.push({ week_id: w.id, week_number: w.week_number, user_id: crowned.user.id, display_name: crowned.user.display_name, method: crowned.method });
+    } else {
+      // Nobody lost: a perfect week closes itself.
+      db.prepare("UPDATE weeks SET status = 'final' WHERE id = ? AND status = 'graded'").run(w.id);
+      out.push({ week_id: w.id, week_number: w.week_number, perfect: true });
+    }
+  }
+  return out;
+}
+
 function openDueWeek(now) {
   if (getSetting('auto_open_week') !== '1') return null;
   const season = activeSeason();
@@ -178,6 +222,7 @@ function openDueWeek(now) {
   if (pickWeek()) return null; // something is already open for picks
   const target = calendar.nflWeekFor(now);
   if (!target) return null;
+  if (target > lastWeek()) return null; // the season is over for this group
   if (db.prepare('SELECT 1 FROM weeks WHERE season_id = ? AND week_number = ?').get(season.id, target)) return null;
   const hour = parseInt(getSetting('auto_open_hour_et'), 10);
   if (now.getTime() < calendar.openAtFor(target, season.year, Number.isFinite(hour) ? hour : 6).getTime()) return null;
@@ -264,7 +309,7 @@ async function liveTick(now, { fetchStats = boxscore.statsForPicks, force = fals
 async function clockTick(now = new Date(), deps = {}) {
   // The one switch: paused, and the commissioner is the clock again.
   if (getSetting('clock_enabled') === '0') return { paused: true, locks_set: 0, locked: 0, opened: null, live: { skipped: 'paused' } };
-  const out = { locks_set: setDefaultLocks(now), locked: lockDueWeeks(now), opened: null, live: null };
+  const out = { locks_set: setDefaultLocks(now), locked: lockDueWeeks(now), crowned: crownDueWeeks(now), opened: null, live: null };
   const opened = openDueWeek(now);
   if (opened) out.opened = opened.week_number;
   try {
@@ -281,6 +326,7 @@ function startClock() {
     clockTick().then((r) => {
       if (r.locked) console.log(`[clock] locked ${r.locked} week(s)`);
       if (r.opened) console.log(`[clock] opened week ${r.opened}`);
+      for (const c of r.crowned || []) console.log(`[clock] crowned week ${c.week_number}: ${c.perfect ? 'perfect week' : c.display_name}`);
       if (r.live && !r.live.skipped) console.log(`[clock] live: ${JSON.stringify(r.live)}`);
     }).catch((err) => console.error('[clock] tick failed:', err.message));
   setTimeout(run, 5000).unref?.();
@@ -297,11 +343,12 @@ function clockStatus(now = new Date()) {
   const openHour = Number.isFinite(hour) ? hour : 6;
   // The next opening is always ahead of us: after the open week's, or the
   // first calendar week whose Tuesday has not come yet.
+  const last = lastWeek();
   let nextNumber = open ? open.week_number + 1 : target;
-  while (season && nextNumber && nextNumber <= 22 && calendar.openAtFor(nextNumber, season.year, openHour).getTime() <= now.getTime()) {
+  while (season && nextNumber && nextNumber <= last && calendar.openAtFor(nextNumber, season.year, openHour).getTime() <= now.getTime()) {
     nextNumber += 1;
   }
-  if (nextNumber > 22) nextNumber = null;
+  if (nextNumber > last) nextNumber = null;
   const liveWeek = season
     ? db.prepare(`SELECT MAX(p.live_at) AS at FROM picks p JOIN weeks w ON w.id = p.week_id WHERE w.season_id = ? AND w.status = 'locked'`).get(season.id)
     : null;
@@ -310,6 +357,8 @@ function clockStatus(now = new Date()) {
     auto_lock: getSetting('auto_lock') === '1',
     lock_time_et: getSetting('lock_time_et') || '12:55',
     auto_open: getSetting('auto_open_week') === '1',
+    auto_crown: getSetting('auto_crown') === '1',
+    last_week: last,
     live_stats: getSetting('live_stats') === '1',
     live_interval_minutes: parseInt(getSetting('live_interval_minutes'), 10) || 1,
     nfl_week: target,

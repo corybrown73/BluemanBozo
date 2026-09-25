@@ -446,6 +446,7 @@ function clockLine() {
     const every = parseInt(c.live_interval_minutes, 10) || 1;
     bits.push(`stats ${every === 1 ? 'every minute' : `every ${every} min`} during games, then grades itself`);
   }
+  if (c.auto_crown) bits.push('crowns the bozo Tuesday morning if the vote is still open');
   if (!bits.length) return '';
   return html`<p class="tiny muted clock-line">🕒 On the clock: ${raw(bits.join(' · '))}. Everything below is the override.</p>`;
 }
@@ -486,6 +487,25 @@ function pickRow(p, opts = {}) {
       )}</div>
     </div>
   </div>`;
+}
+
+/** Two people on the same player is worth a line: they win or sink together. */
+function samePlayerLines(picks) {
+  const byPlayer = new Map();
+  for (const p of picks) {
+    if (p.hidden || !p.player) continue;
+    const key = String(p.player).toLowerCase().replace(/[^a-z]/g, '');
+    if (!byPlayer.has(key)) byPlayer.set(key, []);
+    byPlayer.get(key).push(p);
+  }
+  const lines = [];
+  for (const group of byPlayer.values()) {
+    if (group.length < 2) continue;
+    const names = group.map((p) => esc(p.display_name));
+    const who = names.length === 2 ? `${names[0]} and ${names[1]} are both` : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} are all`;
+    lines.push(`🤝 ${who} riding <b>${esc(group[0].player)}</b>.`);
+  }
+  return lines.length ? `<p class="tiny muted same-player">${lines.join('<br>')}</p>` : '';
 }
 
 /** "Cory's" — but "Chris'" rather than "Chris's". */
@@ -556,7 +576,9 @@ function votingStrip() {
         <h2>${headline}</h2>
         <div class="tiny muted" style="margin-top:3px">${raw(
           top
-            ? `The index says <b>${esc(top.display_name)}</b> (${esc(top.bozo_score)}). The vote decides.`
+            ? `The index says <b>${esc(top.display_name)}</b> (${esc(top.bozo_score)}). The vote decides${raw(
+                S.clock?.auto_crown && S.clock.next_open_at ? ` — it closes ${esc(fmtKickoff(S.clock.next_open_at))}` : ''
+              )}.`
             : 'Nobody lost. The commissioner can close the week.'
         )}</div>
       </div>
@@ -819,6 +841,7 @@ function viewWeek() {
       <div class="spacer"></div>
       ${raw(liveBadge(picks))}
     </div>
+    ${raw(samePlayerLines(picks))}
     ${raw(
       picks.length
         ? picks.map((p) => pickRow(p, { bozoUserId: bozo?.user_id })).join('')
@@ -1224,7 +1247,7 @@ function refreshControl() {
       : `${r.last.age_minutes}m ago`
     : 'lines not pulled yet';
   const who = r.last ? (r.last.scheduled ? ' · auto' : ` · ${esc(r.last.by || '')}`) : '';
-  const left = r.unlimited ? '' : ` · ${r.left} left`;
+  const left = r.unlimited ? '' : ` · ${r.left} refresh${r.left === 1 ? '' : 'es'} left`;
   return html`<span class="tiny faint refresh-meta">${raw(last)}${raw(who)}${raw(left)}</span>
     <button class="btn sm ghost" id="refreshBoard" ${raw(r.can ? '' : 'disabled')}
       title="${raw(r.can ? 'Pull fresh numbers for everyone' : esc(r.reason || ''))}">↻ Refresh</button>`;
@@ -2512,8 +2535,8 @@ function viewVote() {
       ${raw(
         cands.length
           ? html`<p class="hint">
-              The <b>Bozo Index</b> ranks each loss by how badly the number was missed (65%) and how safe the pick was
-              supposed to be (35%). It is a suggestion. You are the jury.
+              The <b>Bozo Index</b> is a suggestion — how badly the number was missed, and how safe the pick looked.
+              You're the jury.
             </p>`
           : ''
       )}
@@ -2540,7 +2563,7 @@ function viewVote() {
                     <div class="meter"><i style="width:${raw((((c.bozo_score || 0) / maxScore) * 100).toFixed(1))}%"></i></div>
                     <div class="row tiny faint" style="justify-content:space-between">
                       <span>missed by ${c.miss_percent}%</span>
-                      <span>${pct(c.implied_probability)} implied</span>
+                      <span>was a ${pct(c.implied_probability)} shot</span>
                     </div>
                   </button>`
                 )
@@ -2868,6 +2891,24 @@ function viewShame() {
       )}
     </div>
 
+    ${raw(
+      (S.leaderboard.players || []).length
+        ? html`<div class="card">
+            <div class="card-head"><h2>Who we keep betting on</h2><span class="tiny faint">${season.label}</span></div>
+            ${raw(
+              S.leaderboard.players
+                .map(
+                  (p) => html`<div class="pickrow">
+                    <span class="av" aria-hidden="true">🏈</span>
+                    <div class="who"><b>${p.player}</b><div class="bet">${p.by_whom.join(', ')}</div></div>
+                    <div class="num"><div class="big">${p.picks}×</div><div class="tiny faint">${p.wins}-${p.losses}</div></div>
+                  </div>`
+                )
+                .join('')
+            )}
+          </div>`
+        : ''
+    )}
     <div class="card">
       <div class="card-head"><h2>Streaks</h2></div>
       <div class="grid three">${raw(
@@ -2924,11 +2965,11 @@ function viewHistory() {
       S.historyRows
         .map(
           (w) => html`<button type="button" class="pickrow rowbtn" data-week="${w.id}"
-            aria-label="Open ${w.year} week ${w.week_number}${raw(w.bozo_name ? `, bozo ${esc(w.bozo_name)}` : ', in progress')}">
+            aria-label="Open ${w.year} week ${w.week_number}${raw(w.bozo_name ? `, bozo ${esc(w.bozo_name)}` : `, ${historyStage(w)}`)}">
             <span class="av" aria-hidden="true">${w.bozo_avatar || '⏳'}</span>
             <div class="who">
               <b>${w.year} · Week ${w.week_number} ${raw(
-                w.bozo_name ? `— <span class="text-danger">${esc(w.bozo_name)}</span>` : '<span class="faint">in progress</span>'
+                w.bozo_name ? `— <span class="text-danger">${esc(w.bozo_name)}</span>` : `<span class="faint">${historyStage(w)}</span>`
               )}</b>
               <div class="bet">${raw(w.roast ? esc(w.roast) : `${esc(w.pick_count)} picks · ${esc(w.win_count)}W-${esc(w.loss_count)}L`)}</div>
             </div>
@@ -3061,6 +3102,14 @@ function viewAdmin() {
               <span class="tiny faint">It takes over the moment week ${raw(w ? w.week_number : '')} is settled${raw(
                 w && w.status === 'graded' ? ' — crown the bozo' : w && w.status === 'locked' ? ' — enter the stat lines' : ''
               )}.</span>
+            </div>`
+          : w && w.status === 'open'
+          ? html`<div class="row">
+              <span class="tiny faint">${raw(
+                S.clock?.auto_open && S.clock.next_open_at
+                  ? `Week ${esc(S.clock.next_open_week)} opens itself ${esc(fmtKickoff(S.clock.next_open_at))}, once this one has locked.`
+                  : 'The next week opens once this one has locked.'
+              )}</span>
             </div>`
           : html`<div class="row">
               <button class="btn primary" id="newWeek">Open the next week</button>
@@ -3198,13 +3247,23 @@ function viewAdmin() {
           <input id="sLockTime" type="time" value="${settings.lock_time_et || '12:55'}"></label>
         <label class="field"><span>Live stats every (minutes)</span>
           <input id="sLiveEvery" type="number" min="1" max="60" step="1" value="${raw(parseInt(settings.live_interval_minutes, 10) || 1)}"></label>
+        <label class="field"><span>Last week of the season</span>
+          <input id="sLastWeek" type="number" min="1" max="22" step="1" value="${raw(parseInt(settings.season_last_week, 10) || 18)}"></label>
       </div>
-      <p class="tiny faint">Stats are pulled only while a game with a pick in it is on. ESPN is free, so every minute is fine.</p>
+      <p class="tiny faint">Stats are pulled only while a game with a pick in it is on. ESPN is free, so every minute is fine. 18 is the regular season; raise it if you play the playoffs.</p>
+      <div class="checkline"><input type="checkbox" id="sCrown" ${raw(settings.auto_crown !== '0' ? 'checked' : '')}>
+        <label for="sCrown"><b>Close the vote itself</b> — Tuesday morning the votes that are in crown the bozo, ties and silence go to the Bozo Index. You can still overrule.</label></div>
 
       <button class="btn primary" id="saveGroup">Save group settings</button>
     </div>
 
     ${raw(schedulePanel())}
+
+    <div class="card">
+      <div class="card-head"><h2>Backup</h2></div>
+      <p class="muted tiny">Every pick, result and bozo on record, as a spreadsheet. Download one now and then — the season lives on one server.</p>
+      <a class="btn sm" href="/api/admin/export.csv" download>Download everything (CSV)</a>
+    </div>
 
     ${raw(historyPanel())}
 
@@ -3234,6 +3293,11 @@ function viewAdmin() {
  * a column headed "Michael" belonging to someone who now goes by Mike must
  * join his record, not start a second one.
  * ------------------------------------------------------------------------- */
+
+/** What a week without a bozo is doing: still going, or closed with nobody to blame. */
+function historyStage(w) {
+  return { open: 'picks open', locked: 'games on', graded: 'voting', final: 'no bozo' }[w.status] || 'in progress';
+}
 
 function historyPanel() {
   const h = S.history;
@@ -3845,6 +3909,8 @@ function wireAdmin() {
         clock_enabled: $('#sClock').checked ? '1' : '0',
         lock_time_et: $('#sLockTime').value || '12:55',
         live_interval_minutes: $('#sLiveEvery').value || '1',
+        season_last_week: $('#sLastWeek').value || '18',
+        auto_crown: $('#sCrown').checked ? '1' : '0',
       })
     );
   }

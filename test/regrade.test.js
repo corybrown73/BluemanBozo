@@ -167,6 +167,7 @@ test('correcting the bozo into a winner takes the crown off and says so', async 
 });
 
 test('correcting a stat that leaves the bozo a loser keeps the crown', async () => {
+  db.prepare("UPDATE weeks SET status = 'locked' WHERE status = 'open'").run(); // one open week at a time
   const w = (await as('boss', 'POST', '/api/weeks', { week_number: 9 })).data.week;
   await as('winner', 'POST', `/api/weeks/${w.id}/picks`, pick('Fine', 10.5));
   await as('loser', 'POST', `/api/weeks/${w.id}/picks`, pick('Bad', 99.5));

@@ -60,6 +60,13 @@ let ids;
 let w1;
 let w2;
 
+/** Plant a week straight into the table — the API refuses a second open week now. */
+function plantWeek(n) {
+  const seasonId = db.prepare('SELECT id FROM seasons').get().id;
+  const info = db.prepare(`INSERT INTO weeks (season_id, week_number, status, stake_cents) VALUES (?, ?, 'open', 2000)`).run(seasonId, n);
+  return { id: Number(info.lastInsertRowid), week_number: n };
+}
+
 test.before(async () => {
   db.prepare('INSERT INTO seasons (year, label, is_active) VALUES (2026, ?, 1)').run('2026 Season');
   const mk = db.prepare(
@@ -123,20 +130,20 @@ test('crowning the bozo hands the app to the open week', async () => {
 });
 
 test('a locked week nobody picked in does not hold the season hostage', async () => {
-  const ghost = (await as('boss', 'POST', '/api/weeks', { week_number: 50 })).data.week;
+  const ghost = plantWeek(50);
   await as('boss', 'PATCH', `/api/weeks/${ghost.id}`, { status: 'locked' });
   assert.strictEqual(currentWeek().id, w2.id, 'an empty locked week is skipped');
 });
 
 test('an accidentally opened week can be deleted while it is empty, and only then', async () => {
-  const oops = (await as('boss', 'POST', '/api/weeks', { week_number: 60 })).data.week;
+  const oops = plantWeek(60);
   const gone = await as('boss', 'DELETE', `/api/weeks/${oops.id}`);
   assert.strictEqual(gone.status, 200);
   assert.strictEqual(gone.data.deleted, 60);
   assert.strictEqual((await as('boss', 'GET', `/api/weeks/${oops.id}`)).status, 404);
 
   // One with a pick in it stays, however fresh.
-  const withPick = (await as('boss', 'POST', '/api/weeks', { week_number: 61 })).data.week;
+  const withPick = plantWeek(61);
   await as('boss', 'POST', `/api/weeks/${withPick.id}/picks`, pick('Somebody', 30.5));
   const keep = await as('boss', 'DELETE', `/api/weeks/${withPick.id}`);
   assert.strictEqual(keep.status, 409);

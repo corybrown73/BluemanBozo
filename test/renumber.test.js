@@ -77,7 +77,10 @@ test.before(async () => {
   for (const u of Object.keys(ids)) await as(u, 'POST', '/api/auth/login', { username: u, password: 'password123' });
 
   leftover = (await as('boss', 'POST', '/api/weeks', {})).data.week;
-  accident = (await as('boss', 'POST', '/api/weeks', {})).data.week;
+  // The API refuses a second open week now; this is how the accident used to happen.
+  const seasonId = db.prepare('SELECT id FROM seasons').get().id;
+  const planted = db.prepare(`INSERT INTO weeks (season_id, week_number, status, stake_cents) VALUES (?, 2, 'open', 2000)`).run(seasonId);
+  accident = { id: Number(planted.lastInsertRowid), week_number: 2 };
   assert.deepStrictEqual([leftover.week_number, accident.week_number], [1, 2]);
 
   // First Sunday: everyone's picks went into the latest open week — the accident.

@@ -298,6 +298,7 @@ test('the slate estimate prices the job without calling the API', async () => {
 
 test('an impossible side for the market is rejected', async () => {
   await call('POST', '/api/auth/login', { username: 'boss', password: 'password123' });
+  db.prepare("UPDATE weeks SET status = 'locked' WHERE status = 'open'").run(); // one open week at a time
   const wk = await call('POST', '/api/weeks', {});
   const id = wk.data.week.id;
 
