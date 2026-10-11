@@ -1856,11 +1856,43 @@ function sideOptionsFor(meta) {
   return sides.map((s) => html`<option>${s}</option>`).join('');
 }
 
-function manualLinePlaceholder() {
-  const meta = currentManualMarket();
+function manualLinePlaceholder(meta = currentManualMarket()) {
   if (!meta) return '74.5';
   if (meta.type === 'yesno') return 'no line on this one';
   return meta.plausible ? String(meta.plausible[0] + (meta.plausible[1] - meta.plausible[0]) / 3).slice(0, 5) : '74.5';
+}
+
+/**
+ * The week's games, for pinning a hand-entered pick to its kickoff. That is
+ * what live stats and self-grading key on; without it the pick is a line of
+ * text the commissioner grades by hand.
+ */
+function gameOptions(selectedId = '') {
+  const events = (S.events || []).slice().sort((a, b) => Date.parse(a.commence_time) - Date.parse(b.commence_time));
+  const blank =
+    events.length ? 'Which game? (so stats come in live)'
+    : S.eventsState === 'loading' ? 'Loading games…'
+    : 'Games not loaded — the pick is graded by hand';
+  return html`<option value="">${blank}</option>${raw(
+    events
+      .map((e) => html`<option value="${e.id}" ${raw(e.id === selectedId ? 'selected' : '')}>${e.away_team} @ ${e.home_team} · ${fmtKickoff(e.commence_time)}</option>`)
+      .join('')
+  )}`;
+}
+
+/** What a chosen game contributes to a pick: the four fields the clock keys on. */
+function gameFields(selectId) {
+  const id = $(selectId)?.value;
+  const e = id ? (S.events || []).find((x) => String(x.id) === String(id)) : null;
+  return e ? { event_id: e.id, home_team: e.home_team, away_team: e.away_team, commence_time: e.commence_time } : {};
+}
+
+/** Games are free to list and cached for everyone; a form that needs them asks once. */
+async function ensureEvents(selectId) {
+  if (S.eventsState !== 'idle') return;
+  await loadEvents(false);
+  const sel = $(selectId);
+  if (sel) sel.innerHTML = gameOptions(sel.value);
 }
 
 function manualForm() {
@@ -1895,6 +1927,7 @@ function manualForm() {
     </label>
     <label class="field"><span>American odds</span><input id="mPrice" type="number" step="5" placeholder="-110"></label>
     <label class="field"><span>Book</span><input id="mBook" placeholder="DraftKings"></label>
+    <label class="field" style="grid-column:1/-1"><span>Game</span><select id="mGame">${raw(gameOptions())}</select></label>
   </div>
   <label class="field"><span>Trash talk (optional)</span><input id="mTrash" maxlength="280" placeholder="Lock of the century."></label>
   <button class="btn primary block" id="submitManual">Lock in my pick</button>`;
@@ -2486,6 +2519,7 @@ function wirePick() {
         bookmaker: $('#mBook').value.trim(),
         line_source: 'manual',
         trash_talk: $('#mTrash').value,
+        ...gameFields('#mGame'),
       });
     });
   }
@@ -3082,6 +3116,14 @@ function viewAdmin() {
               <label class="field"><span>Label</span><input id="wLabel" value="${w.label || ''}" placeholder="Divisional round"></label>
             </div>
             <button class="btn sm" id="saveWeek">Save week settings</button>
+            <details class="disclosure admin-pick" id="adminPickFold" style="margin-top:14px">
+              <summary>
+                <span><b>Enter a pick for a member</b>
+                  <span class="tiny faint">Someone texted you theirs? Put it in for them. It replaces what they had, and it works after lock.</span>
+                </span>
+              </summary>
+              <div class="disclosure-body">${raw(adminPickForm(users))}</div>
+            </details>
             ${raw(
               // Opened by accident? While nobody has picked, it can simply go.
               w.status === 'open' && !S.week.picks.length
@@ -3675,7 +3717,91 @@ function wireHistoryImport() {
   }
 }
 
+/** The commissioner's version of the hand-entry form: the same fields, plus whose pick it is. */
+function adminPickForm(users) {
+  const cat = S.marketCatalog || [];
+  if (!cat.length) return '<p class="tiny faint">The market list didn\'t load. Reload the page and try again.</p>';
+  const meta = cat.find((m) => m.key === S.adminMarket) || cat.find((m) => m.key === 'player_anytime_td') || cat[0];
+  const members = (users || []).filter((u) => u.is_active !== 0 && u.is_active !== false);
+  return html`<div class="grid two">
+    <label class="field"><span>Whose pick</span>
+      <select id="aMember">${raw(members.map((u) => html`<option value="${u.id}">${u.avatar || ''} ${u.display_name}</option>`).join(''))}</select>
+    </label>
+    <label class="field"><span>Player</span><input id="aPlayer" placeholder="Jayden Daniels"></label>
+    <label class="field"><span>Market</span>
+      <select id="aMarket">${raw(cat.map((m) => html`<option value="${m.key}" ${raw(m.key === meta.key ? 'selected' : '')}>${m.label}</option>`).join(''))}</select>
+    </label>
+    <label class="field"><span>Side</span><select id="aSide">${raw(sideOptionsFor(meta))}</select></label>
+    <label class="field"><span>Line</span>
+      <input id="aLine" type="number" step="0.5" placeholder="${raw(manualLinePlaceholder(meta))}" ${raw(meta.type === 'yesno' ? 'disabled' : '')}></label>
+    <label class="field"><span>American odds</span><input id="aPrice" type="number" step="5" placeholder="-110"></label>
+    <label class="field" style="grid-column:1/-1"><span>Game</span><select id="aGame">${raw(gameOptions())}</select></label>
+  </div>
+  <button class="btn primary" id="submitAdminPick">Save their pick</button>`;
+}
+
 function wireAdmin() {
+  const fold = $('#adminPickFold');
+  if (fold) fold.addEventListener('toggle', () => { if (fold.open) ensureEvents('#aGame'); });
+
+  const aMarket = $('#aMarket');
+  if (aMarket) {
+    aMarket.addEventListener('change', () => {
+      S.adminMarket = aMarket.value;
+      const meta = (S.marketCatalog || []).find((m) => m.key === aMarket.value);
+      const side = $('#aSide');
+      const line = $('#aLine');
+      if (side) side.innerHTML = sideOptionsFor(meta);
+      if (line) {
+        const yesNo = meta?.type === 'yesno';
+        line.disabled = yesNo;
+        line.placeholder = manualLinePlaceholder(meta);
+        if (yesNo) line.value = '';
+      }
+    });
+  }
+
+  const submitAdminPick = $('#submitAdminPick');
+  if (submitAdminPick) {
+    submitAdminPick.addEventListener('click', async () => {
+      const memberSel = $('#aMember');
+      const marketSel = $('#aMarket');
+      const userId = parseInt(memberSel.value, 10);
+      const who = memberSel.options[memberSel.selectedIndex].textContent.trim();
+      const player = $('#aPlayer').value.trim();
+      if (!player) return toast('Who is the player?', 'err');
+      const lineRaw = $('#aLine').value;
+      const priceRaw = $('#aPrice').value;
+      const existing = (S.week?.picks || []).find((p) => p.user_id === userId);
+      submitAdminPick.disabled = true;
+      try {
+        const res = await api(`/api/weeks/${S.week.week.id}/picks`, {
+          method: 'POST',
+          body: {
+            user_id: userId,
+            pick_id: existing?.id,
+            player,
+            market: marketSel.value,
+            market_label: marketSel.options[marketSel.selectedIndex].textContent,
+            selection: $('#aSide').value,
+            line: lineRaw === '' ? null : Number(lineRaw),
+            price: priceRaw === '' ? -110 : Number(priceRaw),
+            line_source: 'manual',
+            ...gameFields('#aGame'),
+          },
+        });
+        S.week = res;
+        if (res.warning) toast(res.warning, 'err', 8000);
+        const mine = (res.picks || []).find((p) => p.user_id === userId);
+        toast(`${who}: ${mine ? describePick(mine) : player}${existing ? ' (replaced their old pick)' : ''}.`, 'ok', 8000);
+        render();
+      } catch (err) {
+        toast(err.message, 'err', 7000);
+        submitAdminPick.disabled = false;
+      }
+    });
+  }
+
   wireHistoryImport();
   wireEmptyStateActions();
   $$('[data-status]').forEach((btn) =>

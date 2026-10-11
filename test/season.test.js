@@ -190,3 +190,36 @@ test('the whole record downloads as a spreadsheet', async () => {
   const member = await as('a', 'GET', '/api/admin/export.csv');
   assert.strictEqual(member.status, 403, 'commissioner only');
 });
+
+test("the commissioner can put a member's pick in for them, and swap it after lock", async () => {
+  const w = currentWeek();
+  assert.strictEqual(w.status, 'open');
+  const entered = await as('boss', 'POST', `/api/weeks/${w.id}/picks`, {
+    user_id: ids.a, player: 'Alpha Texted', market: 'player_rush_yds', market_label: 'Rushing Yards',
+    selection: 'Over', line: 55.5, price: -110, line_source: 'manual',
+  });
+  assert.strictEqual(entered.status, 200, JSON.stringify(entered.data));
+  const alpha = entered.data.picks.find((p) => p.username === 'a');
+  assert.strictEqual(alpha.player, 'Alpha Texted');
+
+  // Locked, and Alpha changes their mind by text. The commissioner swaps it.
+  await as('boss', 'PATCH', `/api/weeks/${w.id}`, { status: 'locked' });
+  const swapped = await as('boss', 'POST', `/api/weeks/${w.id}/picks`, {
+    user_id: ids.a, pick_id: alpha.id, player: 'Jayden Daniels', market: 'player_anytime_td',
+    market_label: 'Anytime TD', selection: 'Yes', line: null, price: 120, line_source: 'manual',
+    home_team: 'Washington Commanders', away_team: 'New York Giants', commence_time: '2026-10-11T17:00:00Z',
+  });
+  assert.strictEqual(swapped.status, 200, JSON.stringify(swapped.data));
+  const after = swapped.data.picks.filter((p) => p.username === 'a');
+  assert.strictEqual(after.length, 1, 'swapped, not added');
+  assert.strictEqual(after[0].player, 'Jayden Daniels');
+  assert.strictEqual(after[0].selection, 'Yes');
+  assert.strictEqual(after[0].commence_time, '2026-10-11T17:00:00Z', 'pinned to its game, so the clock can grade it');
+
+  // A member cannot do the same once the week is locked, for themselves or anyone.
+  const sneaky = await as('b', 'POST', `/api/weeks/${w.id}/picks`, {
+    user_id: ids.a, pick_id: alpha.id, player: 'Nope', market: 'player_rush_yds', market_label: 'Rushing Yards',
+    selection: 'Over', line: 1.5, price: -110,
+  });
+  assert.strictEqual(sneaky.status, 409);
+});
